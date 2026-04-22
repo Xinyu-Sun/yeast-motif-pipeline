@@ -1,0 +1,33 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+
+# Pipeline outputs (keep only docs in this folder)
+data/output/*
+!data/output/README.md
+
+# Local input datasets (user-provided)
+data/input/*.xlsx
+data/input/*.xls
+data/input/*.csv
+data/input/*.tsv
+data/input/*.fa
+data/input/*.fasta
+data/input/*.clu
+data/input/*.distmat
+
+# Common generated assets
+*.png
+*.pdf
