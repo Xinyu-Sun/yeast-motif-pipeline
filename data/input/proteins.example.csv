@@ -1,0 +1,5 @@
+category,protein,y_name,accession,fasta_header,amino_acid_sequence,raw_fasta
+Pol II,Example TF 1,YAL001C,,,,">sp|P00000|EXAMPLE1_YEAST Example TF 1
+MSTNPKPQR"
+Pol III,Example TF 2,YBR001C,,,,">sp|P00001|EXAMPLE2_YEAST Example TF 2
+MSSNNTTKK"

@@ -10,6 +10,9 @@ Pipeline:
 
 Default input workbook:
     ./data/input/polymerase_tf_sequences.xlsx
+
+Alternative CSV input:
+    ./data/input/proteins.csv
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ import xml.etree.ElementTree as ET
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_XLSX = REPO_ROOT / "data" / "input" / "polymerase_tf_sequences.xlsx"
+DEFAULT_CSV = REPO_ROOT / "data" / "input" / "proteins.csv"
 DEFAULT_OUTDIR = REPO_ROOT / "data" / "output"
 SGD_BASE = "https://www.yeastgenome.org/backend/locus"
 INTERPRO_BASE = "https://www.ebi.ac.uk/interpro/api/entry/interpro/protein/uniprot"
@@ -55,6 +59,22 @@ INTERPRO_MEMBER_TO_SOURCE = {
     "prosite": "PROSITE",
     "smart": "SMART",
     "ssf": "SUPERFAMILY",
+}
+
+CSV_FIELD_ALIASES = {
+    "category": ("category", "group", "polymerase", "pol", "class"),
+    "protein": ("protein", "protein_name", "name", "gene", "standard_name"),
+    "y_name": ("y_name", "y name", "yname", "systematic_name", "systematic name", "locus", "sgd_locus"),
+    "accession": ("accession", "accession_id", "uniprot", "uniprot_id"),
+    "fasta_header": ("fasta_header", "fasta header", "header"),
+    "amino_acid_sequence": (
+        "amino_acid_sequence",
+        "amino acid sequence",
+        "sequence",
+        "protein_sequence",
+        "aa_sequence",
+    ),
+    "raw_fasta": ("raw_fasta", "raw fasta", "fasta"),
 }
 
 
@@ -86,6 +106,69 @@ def parse_fasta_cell(raw: str) -> Tuple[str, str]:
     seq_lines = lines[1:] if header else lines
     sequence = "".join(seq_lines).replace(" ", "")
     return header, sequence
+
+
+def normalize_csv_header(value: str | None) -> str:
+    return "".join(ch for ch in clean_text(value).lower() if ch.isalnum())
+
+
+def csv_value(row: dict, field: str) -> str:
+    for alias in CSV_FIELD_ALIASES[field]:
+        value = row.get(normalize_csv_header(alias), "")
+        if clean_text(value):
+            return clean_text(value)
+    return ""
+
+
+def read_csv_entries(path: Path) -> List[dict]:
+    entries: List[dict] = []
+    seen_y_names: set[str] = set()
+
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        reader = csv.DictReader(handle)
+        if not reader.fieldnames:
+            raise SystemExit(f"CSV input has no header row: {path}")
+
+        normalized_fields = {normalize_csv_header(field): field for field in reader.fieldnames}
+        has_lookup_field = any(
+            normalize_csv_header(alias) in normalized_fields
+            for field in ("y_name", "protein")
+            for alias in CSV_FIELD_ALIASES[field]
+        )
+        if not has_lookup_field:
+            expected = ", ".join((*CSV_FIELD_ALIASES["y_name"], *CSV_FIELD_ALIASES["protein"]))
+            raise SystemExit(f"CSV input must include an SGD lookup column such as: {expected}")
+
+        for row_num, raw_row in enumerate(reader, start=2):
+            row = {normalize_csv_header(key): value for key, value in raw_row.items() if key is not None}
+            y_name = csv_value(row, "y_name") or csv_value(row, "protein")
+            if not y_name:
+                continue
+            if y_name in seen_y_names:
+                raise SystemExit(f"Duplicate y_name in CSV input at row {row_num}: {y_name}")
+            seen_y_names.add(y_name)
+
+            raw_fasta = csv_value(row, "raw_fasta")
+            fasta_header, fasta_sequence = parse_fasta_cell(raw_fasta)
+            header = csv_value(row, "fasta_header") or fasta_header
+            sequence = csv_value(row, "amino_acid_sequence") or fasta_sequence
+            protein = csv_value(row, "protein") or y_name
+
+            entries.append(
+                {
+                    "category": csv_value(row, "category") or "Unknown",
+                    "protein": protein,
+                    "y_name": y_name,
+                    "accession": csv_value(row, "accession"),
+                    "fasta_header": header,
+                    "amino_acid_sequence": sequence.replace(" ", "").replace("\n", ""),
+                    "raw_fasta": raw_fasta,
+                }
+            )
+
+    if not entries:
+        raise SystemExit(f"No protein rows found in CSV input: {path}")
+    return entries
 
 
 class XlsxSheet:
@@ -582,7 +665,7 @@ def summarize_run(protein_count: int, domain_rows: List[dict], key_field: str, m
     }
 
 
-def validate_counts(category_entries: List[dict], combined_entries: List[dict]) -> None:
+def validate_workbook_counts(category_entries: List[dict], combined_entries: List[dict]) -> None:
     counts = Counter(entry["category"] for entry in category_entries)
     expected = {"Pol I": 13, "Pol II": 26, "Pol III": 9}
     if dict(counts) != expected:
@@ -593,7 +676,17 @@ def validate_counts(category_entries: List[dict], combined_entries: List[dict]) 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--xlsx", type=Path, default=DEFAULT_XLSX, help="Path to the input .xlsx workbook")
+    input_group = parser.add_mutually_exclusive_group()
+    input_group.add_argument("--xlsx", type=Path, default=DEFAULT_XLSX, help="Path to the input .xlsx workbook")
+    input_group.add_argument(
+        "--csv",
+        type=Path,
+        help=(
+            "Path to a CSV protein table. Preferred lookup column: y_name "
+            "(or Y Name/systematic_name/locus); protein/name/standard_name also work as lookup columns. "
+            "Optional columns: category, protein, accession, fasta_header, amino_acid_sequence, raw_fasta."
+        ),
+    )
     parser.add_argument("--outdir", type=Path, default=DEFAULT_OUTDIR, help="Output directory for CSV and cache files")
     parser.add_argument("--sleep-seconds", type=float, default=0.15, help="Delay between API requests")
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout in seconds")
@@ -604,14 +697,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if not args.xlsx.exists():
-        print(f"Input workbook not found: {args.xlsx}", file=sys.stderr)
+    input_path = args.csv or args.xlsx
+    if not input_path.exists():
+        input_type = "CSV input" if args.csv else "Input workbook"
+        print(f"{input_type} not found: {input_path}", file=sys.stderr)
         return 1
 
-    sheet = XlsxSheet(args.xlsx)
-    category_entries, category_by_yname = extract_category_entries(sheet)
-    combined_entries = extract_combined_entries(sheet, category_by_yname)
-    validate_counts(category_entries, combined_entries)
+    if args.csv:
+        combined_entries = read_csv_entries(args.csv)
+    else:
+        sheet = XlsxSheet(args.xlsx)
+        category_entries, category_by_yname = extract_category_entries(sheet)
+        combined_entries = extract_combined_entries(sheet, category_by_yname)
+        validate_workbook_counts(category_entries, combined_entries)
 
     protein_rows, raw_domain_rows, sgd_failures = fetch_sgd_records(
         proteins=combined_entries,
@@ -802,7 +900,10 @@ def main() -> int:
         failures=len(sgd_failures) + len(interpro_failures),
     )
     summary = {
-        "input_workbook": str(args.xlsx),
+        "input_file": str(input_path),
+        "input_format": "csv" if args.csv else "xlsx",
+        "input_workbook": str(args.xlsx) if not args.csv else "",
+        "input_csv": str(args.csv) if args.csv else "",
         "output_directory": str(outdir),
         "category_counts": Counter(entry["category"] for entry in combined_entries),
         "raw": raw_summary,

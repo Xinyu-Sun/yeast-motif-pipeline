@@ -22,6 +22,7 @@ data/output/*
 data/input/*.xlsx
 data/input/*.xls
 data/input/*.csv
+!data/input/*.example.csv
 data/input/*.tsv
 data/input/*.fa
 data/input/*.fasta

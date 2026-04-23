@@ -35,7 +35,41 @@ No non-stdlib Python packages are required.
 
 ## Inputs
 
-### 1) Motif collection workbook (`.xlsx`)
+### 1) Protein list input (`.csv`, preferred)
+
+The extractor can read a simple CSV table of proteins to look up:
+
+```csv
+category,protein,y_name,accession,fasta_header,amino_acid_sequence,raw_fasta
+Pol II,Example TF 1,YAL001C,,,,
+```
+
+Required lookup column:
+- Prefer `y_name`: SGD locus/systematic name used for API lookup.
+- A single `protein`, `name`, or `standard_name` column also works if its values are valid SGD lookup names.
+
+Optional columns:
+- `category`: group label such as `Pol I`, `Pol II`, or `Pol III`
+- `protein`: display name
+- `accession`: accession identifier
+- `fasta_header`, `amino_acid_sequence`, or `raw_fasta`: optional sequence metadata
+
+Accepted aliases include `Y Name`, `systematic_name`, or `locus` for `y_name`;
+`name` or `standard_name` for `protein`; and `sequence` or `aa_sequence` for
+`amino_acid_sequence`.
+
+Example template:
+- `data/input/proteins.example.csv`
+
+Run with `--csv`:
+
+```bash
+python3 scripts/extract_sgd_domains.py \
+  --csv data/input/proteins.csv \
+  --outdir data/output
+```
+
+### 2) Motif collection workbook (`.xlsx`, legacy)
 
 The extractor expects the same column block layout as the original workbook:
 - Pol I block: columns `A:D`
@@ -48,7 +82,7 @@ Default expected location:
 
 Use `--xlsx` to pass a different file.
 
-### 2) Clustal Omega tree (`.phylotree`)
+### 3) Clustal Omega tree (`.phylotree`)
 
 Default tree:
 - `data/input/clustalo-all48.phylotree`
@@ -63,9 +97,11 @@ Run all commands from repository root.
 
 ```bash
 python3 scripts/extract_sgd_domains.py \
-  --xlsx data/input/polymerase_tf_sequences.xlsx \
+  --csv data/input/proteins.csv \
   --outdir data/output
 ```
+
+For the original workbook format, use `--xlsx data/input/polymerase_tf_sequences.xlsx`.
 
 Useful options:
 - `--force-refresh`: re-fetch API responses instead of using cache

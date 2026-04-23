@@ -3,7 +3,7 @@
 ## Scripts
 
 - `scripts/extract_sgd_domains.py`
-  - Reads workbook + calls SGD/InterPro APIs
+  - Reads a CSV protein table or legacy workbook + calls SGD/InterPro APIs
   - Produces protein/domain tables, matrices, source summary, and cache files
 
 - `scripts/summarize_shared_domains.py`
@@ -15,6 +15,6 @@
 
 ## Typical Data Flow
 
-1. Workbook (`data/input/*.xlsx`) -> extraction outputs in `data/output/`
+1. Protein list (`data/input/*.csv`) or workbook (`data/input/*.xlsx`) -> extraction outputs in `data/output/`
 2. Raw hits table -> shared-domain summary table
 3. Tree + raw hits + proteins table -> SVG figure + order CSV
