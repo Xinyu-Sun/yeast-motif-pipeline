@@ -14,6 +14,8 @@ from typing import List
 
 import plot_clustalo_motif_figure as base
 
+PT_PER_SVG_PX = 72.0 / base.SVG_DPI
+
 
 def load_matplotlib():
     try:
@@ -32,6 +34,10 @@ def mpl_font_family(style: dict) -> list[str]:
     if "DejaVu Sans" not in families:
         families.append("DejaVu Sans")
     return families
+
+
+def pt(value: float | str) -> float:
+    return float(value) * PT_PER_SVG_PX
 
 
 def draw_matplotlib_figure(
@@ -68,7 +74,7 @@ def draw_matplotlib_figure(
         title,
         ha="center",
         va="baseline",
-        fontsize=float(style["title_font_size"]),
+        fontsize=pt(style["title_font_size"]),
         fontweight="bold",
         family=font_family,
         color="black",
@@ -79,7 +85,7 @@ def draw_matplotlib_figure(
         [layout["title_x"] - line_half, layout["title_x"] + line_half],
         [line_y, line_y],
         color=str(style["frame_color"]),
-        linewidth=float(style["title_line_width"]),
+        linewidth=pt(style["title_line_width"]),
     )
     ax.text(
         layout["title_x"],
@@ -87,7 +93,7 @@ def draw_matplotlib_figure(
         subtitle,
         ha="center",
         va="baseline",
-        fontsize=float(style["subtitle_font_size"]),
+        fontsize=pt(style["subtitle_font_size"]),
         family=font_family,
         color="black",
     )
@@ -116,7 +122,7 @@ def draw_matplotlib_figure(
             str(style["legend_title"]),
             ha="left",
             va="baseline",
-            fontsize=float(style["legend_title_font_size"]),
+            fontsize=pt(style["legend_title_font_size"]),
             fontweight="bold",
             family=font_family,
             color="black",
@@ -132,7 +138,7 @@ def draw_matplotlib_figure(
                     swatch_size,
                     facecolor=category_colors.get(category, "#000000"),
                     edgecolor=str(style["frame_color"]),
-                    linewidth=0.4,
+                    linewidth=pt(0.4),
                 )
             )
             ax.text(
@@ -141,7 +147,7 @@ def draw_matplotlib_figure(
                 category,
                 ha="left",
                 va="baseline",
-                fontsize=float(style["legend_font_size"]),
+                fontsize=pt(style["legend_font_size"]),
                 family=font_family,
                 color="black",
             )
@@ -157,7 +163,7 @@ def draw_matplotlib_figure(
             va="center",
             rotation=90,
             rotation_mode="anchor",
-            fontsize=float(style["protein_label_font_size"]),
+            fontsize=pt(style["protein_label_font_size"]),
             family=font_family,
             color=category_colors.get(row.get("category", ""), "#000000"),
         )
@@ -168,7 +174,7 @@ def draw_matplotlib_figure(
             [x, x],
             [matrix_top, matrix_top + matrix_h],
             color=str(style["grid_color"]),
-            linewidth=float(style["grid_width"]),
+            linewidth=pt(style["grid_width"]),
         )
 
     for row_idx, domain in enumerate(domain_keys):
@@ -180,7 +186,7 @@ def draw_matplotlib_figure(
             label,
             ha="right",
             va="center",
-            fontsize=float(style["domain_label_font_size"]),
+            fontsize=pt(style["domain_label_font_size"]),
             family=font_family,
             color="black",
         )
@@ -195,7 +201,7 @@ def draw_matplotlib_figure(
                     radius=float(style["dot_radius"]),
                     facecolor=str(style["dot_fill"]),
                     edgecolor=str(style["dot_stroke"]),
-                    linewidth=float(style["dot_stroke_width"]),
+                    linewidth=pt(style["dot_stroke_width"]),
                 )
             )
 
@@ -204,7 +210,7 @@ def draw_matplotlib_figure(
             [x1, x2],
             [y1, y2],
             color=str(style["tree_stroke_color"]),
-            linewidth=float(style["tree_stroke_width"]),
+            linewidth=pt(style["tree_stroke_width"]),
         )
 
     ax.add_patch(
@@ -214,7 +220,7 @@ def draw_matplotlib_figure(
             matrix_h,
             fill=False,
             edgecolor=str(style["frame_color"]),
-            linewidth=float(style["frame_width"]),
+            linewidth=pt(style["frame_width"]),
         )
     )
 
