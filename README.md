@@ -20,6 +20,7 @@ yeast-motif-pipeline/
 ├── docs/
 ├── scripts/
 │   ├── extract_sgd_domains.py
+│   ├── plot_clustalo_motif_figure_matplotlib.py
 │   ├── summarize_shared_domains.py
 │   └── plot_clustalo_motif_figure.py
 ├── .gitignore
@@ -37,6 +38,8 @@ SVG plotting.
 Optional plot exports:
 - PNG export with `--png` requires Pillow.
 - PDF export with `--pdf` requires ReportLab.
+- The experimental Matplotlib renderer requires `matplotlib`; see
+  `requirements-plotting.txt`.
 
 ## Inputs
 
@@ -235,6 +238,26 @@ python3 scripts/plot_clustalo_motif_figure.py \
 - Typography: `--font-family`, `--title-font-size`, `--subtitle-font-size`, `--protein-label-font-size`, `--domain-label-font-size`
 - Colors: `--dot-fill`, `--dot-stroke`, `--grid-color`, `--background-color`, `--category-color`
 - Legend: `--no-legend`, `--legend-position`, `--legend-x`, `--legend-y`
+
+## Experimental Matplotlib Renderer
+
+This branch includes a side-by-side Matplotlib implementation:
+
+```bash
+python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
+  --tree data/input/clustalo-all48.phylotree \
+  --hits data/output/polymerase_tf_domain_hits_raw.csv \
+  --proteins data/output/polymerase_tf_proteins.csv \
+  --out data/output/all48_motif_figure_matplotlib.svg \
+  --png data/output/all48_motif_figure_matplotlib.png \
+  --pdf data/output/all48_motif_figure_matplotlib.pdf
+```
+
+Install its dependency with:
+
+```bash
+python3 -m pip install -r requirements-plotting.txt
+```
 
 ## Output and Caching Notes
 
