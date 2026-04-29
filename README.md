@@ -36,8 +36,8 @@ No non-stdlib Python packages are required for extraction, summarization, or
 SVG plotting.
 
 Optional plot exports:
-- PNG export with `--png` requires Pillow.
-- PDF export with `--pdf` requires ReportLab.
+- PNG export with `--png` uses the SVG output and requires Pillow.
+- PDF export with `--pdf` uses the SVG output when system conversion is available, with ReportLab as a fallback.
 - The experimental Matplotlib renderer requires `matplotlib`; see
   `requirements-plotting.txt`.
 

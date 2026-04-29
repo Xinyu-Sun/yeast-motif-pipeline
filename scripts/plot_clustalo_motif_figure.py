@@ -21,6 +21,9 @@ import csv
 import html
 import json
 import re
+import shutil
+import subprocess
+import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,8 +45,8 @@ DEFAULT_CATEGORY_COLORS = {
 
 DEFAULT_STYLE = {
     "margin_left": 172.0,
-    "margin_right": 18.0,
-    "margin_top": 8.0,
+    "margin_right": 16.0,
+    "margin_top": 0.0,
     "margin_bottom": 12.0,
     "cell_width": 13.0,
     "cell_height": 14.0,
@@ -58,8 +61,9 @@ DEFAULT_STYLE = {
     "domain_label_font_size": 9.5,
     "legend_title_font_size": 10.5,
     "legend_font_size": 9.5,
+    "title_baseline_offset": -3.0,
     "title_subtitle_gap": 18.0,
-    "subtitle_matrix_gap": 24.0,
+    "subtitle_matrix_gap": 8.0,
     "title_line_half_length": 88.0,
     "title_line_offset": 4.0,
     "title_line_width": 1.0,
@@ -475,13 +479,14 @@ def prepare_layout(tree: Node, tree_labels: List[str], domain_keys: List[str], s
     dendro_bottom_pad = float(style["dendrogram_bottom_padding"])
 
     title_font_size = float(style["title_font_size"])
+    title_baseline_offset = float(style.get("title_baseline_offset", 0.0))
     title_subtitle_gap = float(style["title_subtitle_gap"])
     subtitle_matrix_gap = float(style["subtitle_matrix_gap"])
 
     matrix_w = len(tree_labels) * cell_w
     matrix_h = max(len(domain_keys), 1) * cell_h
 
-    title_y = margin_top + title_font_size
+    title_y = margin_top + title_font_size + title_baseline_offset
     subtitle_y = title_y + title_subtitle_gap
     matrix_top = subtitle_y + subtitle_matrix_gap + col_label_h
     matrix_left = margin_left
@@ -513,6 +518,7 @@ def prepare_layout(tree: Node, tree_labels: List[str], domain_keys: List[str], s
         "dendro_bottom_pad": dendro_bottom_pad,
         "title_font_size": title_font_size,
         "subtitle_font_size": float(style["subtitle_font_size"]),
+        "title_baseline_offset": title_baseline_offset,
         "title_subtitle_gap": title_subtitle_gap,
         "subtitle_matrix_gap": subtitle_matrix_gap,
         "matrix_w": matrix_w,
@@ -1036,6 +1042,55 @@ def build_pdf(
     c.save()
 
 
+def export_png_from_svg(svg_path: Path, png_path: Path, dpi: float) -> bool:
+    sips = shutil.which("sips")
+    if not sips:
+        return False
+    if dpi <= 0:
+        raise SystemExit("--export-dpi must be > 0")
+
+    Image, _ImageDraw, _ImageFont = load_pillow()
+    png_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_png = Path(tmpdir) / "figure.png"
+        result = subprocess.run(
+            [sips, "-s", "format", "png", str(svg_path), "--out", str(tmp_png)],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode != 0 or not tmp_png.exists():
+            return False
+
+        rendered = Image.open(tmp_png).convert("RGBA")
+        white = Image.new("RGBA", rendered.size, (255, 255, 255, 255))
+        white.alpha_composite(rendered)
+        image = white.convert("RGB")
+        if dpi != SVG_DPI:
+            scale = dpi / SVG_DPI
+            width = max(1, int(round(image.width * scale)))
+            height = max(1, int(round(image.height * scale)))
+            image = image.resize((width, height), Image.Resampling.LANCZOS)
+        image.save(png_path, dpi=(dpi, dpi))
+    return True
+
+
+def export_pdf_from_svg(svg_path: Path, pdf_path: Path) -> bool:
+    sips = shutil.which("sips")
+    if not sips:
+        return False
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [sips, "-s", "format", "pdf", str(svg_path), "--out", str(pdf_path)],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return result.returncode == 0 and pdf_path.exists()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tree", type=Path, default=DEFAULT_TREE)
@@ -1148,10 +1203,12 @@ def build_style(args: argparse.Namespace) -> dict:
 
 
 def validate_style(style: dict) -> None:
+    nonnegative_keys = [
+        "margin_top",
+    ]
     positive_keys = [
         "margin_left",
         "margin_right",
-        "margin_top",
         "margin_bottom",
         "cell_width",
         "cell_height",
@@ -1162,6 +1219,10 @@ def validate_style(style: dict) -> None:
         "protein_label_font_size",
         "domain_label_font_size",
     ]
+    for key in nonnegative_keys:
+        value = float(style[key])
+        if value < 0:
+            raise SystemExit(f"Style value {key} must be >= 0, got {value}")
     for key in positive_keys:
         value = float(style[key])
         if value <= 0:
@@ -1234,30 +1295,34 @@ def main() -> int:
         style=style,
     )
     if args.png:
-        build_png(
-            tree=pruned_tree,
-            tree_labels=resolved_tree_labels,
-            domain_keys=domain_keys,
-            ordered_rows=ordered_rows,
-            out=args.png,
-            title=args.title,
-            subtitle=args.subtitle,
-            show_legend=not args.no_legend,
-            style=style,
-            dpi=args.export_dpi,
-        )
+        exported = export_png_from_svg(args.out, args.png, args.export_dpi)
+        if not exported:
+            build_png(
+                tree=pruned_tree,
+                tree_labels=resolved_tree_labels,
+                domain_keys=domain_keys,
+                ordered_rows=ordered_rows,
+                out=args.png,
+                title=args.title,
+                subtitle=args.subtitle,
+                show_legend=not args.no_legend,
+                style=style,
+                dpi=args.export_dpi,
+            )
     if args.pdf:
-        build_pdf(
-            tree=pruned_tree,
-            tree_labels=resolved_tree_labels,
-            domain_keys=domain_keys,
-            ordered_rows=ordered_rows,
-            out=args.pdf,
-            title=args.title,
-            subtitle=args.subtitle,
-            show_legend=not args.no_legend,
-            style=style,
-        )
+        exported = export_pdf_from_svg(args.out, args.pdf)
+        if not exported:
+            build_pdf(
+                tree=pruned_tree,
+                tree_labels=resolved_tree_labels,
+                domain_keys=domain_keys,
+                ordered_rows=ordered_rows,
+                out=args.pdf,
+                title=args.title,
+                subtitle=args.subtitle,
+                show_legend=not args.no_legend,
+                style=style,
+            )
 
     print(f"Wrote figure: {args.out}")
     if args.png:
