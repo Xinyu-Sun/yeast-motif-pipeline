@@ -11,10 +11,11 @@
 
 - `scripts/plot_clustalo_motif_figure.py`
   - Builds SVG motif matrix + dendrogram from tree/hits/proteins tables
+  - Optionally exports PNG and PDF copies of the plot
   - Supports category-specific plots and layout customization via CLI/JSON
 
 ## Typical Data Flow
 
 1. Protein list (`data/input/*.csv`) or workbook (`data/input/*.xlsx`) -> extraction outputs in `data/output/`
 2. Raw hits table -> shared-domain summary table
-3. Tree + raw hits + proteins table -> SVG figure + order CSV
+3. Tree + raw hits + proteins table -> SVG figure, optional PNG/PDF exports, and order CSV

@@ -31,7 +31,12 @@ yeast-motif-pipeline/
 - Python 3.9+
 - Internet access for `extract_sgd_domains.py` (calls SGD + InterPro APIs)
 
-No non-stdlib Python packages are required.
+No non-stdlib Python packages are required for extraction, summarization, or
+SVG plotting.
+
+Optional plot exports:
+- PNG export with `--png` requires Pillow.
+- PDF export with `--pdf` requires ReportLab.
 
 ## Inputs
 
@@ -138,6 +143,8 @@ python3 scripts/plot_clustalo_motif_figure.py \
   --hits data/output/polymerase_tf_domain_hits_raw.csv \
   --proteins data/output/polymerase_tf_proteins.csv \
   --out data/output/all48_motif_figure.svg \
+  --png data/output/all48_motif_figure.png \
+  --pdf data/output/all48_motif_figure.pdf \
   --order-csv data/output/all48_motif_order.csv \
   --title "All 48 Protein TFs" \
   --subtitle "Hierarchical Clustering" \
@@ -147,6 +154,7 @@ python3 scripts/plot_clustalo_motif_figure.py \
 Defaults:
 - MobiDBLite is excluded
 - legend is enabled
+- SVG is always written; PNG/PDF are optional exports
 
 ## Category-Specific Plotting
 
@@ -218,6 +226,9 @@ python3 scripts/plot_clustalo_motif_figure.py \
 
 - `--min-proteins`: shared-domain threshold
 - `--exclude-mobidblite` / `--include-mobidblite`
+- `--png`: optional PNG export path
+- `--pdf`: optional PDF export path
+- `--export-dpi`: PNG export DPI
 - Margins: `--margin-left/right/top/bottom`
 - Cell geometry: `--cell-width`, `--cell-height`
 - Vertical spacing: `--title-subtitle-gap`, `--subtitle-matrix-gap`, `--dendrogram-gap`
