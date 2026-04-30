@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Experimental Matplotlib renderer for motif/domain dot-matrix figures.
+"""Matplotlib renderer for motif/domain dot-matrix figures.
 
-This script keeps the native SVG writer intact and explores a standard
+This script keeps the native SVG writer intact and provides a standard
 plotting-library implementation using the same input files and most of the same
 CLI/style options as ``plot_clustalo_motif_figure.py``.
 """
@@ -23,7 +23,7 @@ def load_matplotlib():
         from matplotlib import patches
     except ImportError as exc:
         raise SystemExit(
-            "The experimental Matplotlib renderer requires matplotlib. "
+            "The Matplotlib renderer requires matplotlib. "
             "Install it with `python3 -m pip install matplotlib`."
         ) from exc
     return plt, patches

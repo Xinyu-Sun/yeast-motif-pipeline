@@ -455,9 +455,9 @@ def determine_legend_position(
         position = "top-left" if width < 420 else "top-right"
 
     if position == "top-left":
-        return 12.0, max(6.0, matrix_top - 52.0)
+        return 12.0, 8.0
     if position == "top-right":
-        return max(width - 165.0, matrix_left + matrix_w - 95.0), max(6.0, matrix_top - 52.0)
+        return max(width - 165.0, matrix_left + matrix_w - 95.0), 8.0
     if position == "bottom-left":
         return 12.0, tree_top + tree_h + 2.0
     if position == "bottom-right":

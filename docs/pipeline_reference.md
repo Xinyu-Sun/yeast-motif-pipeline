@@ -15,7 +15,7 @@
   - Supports category-specific plots and layout customization via CLI/JSON
 
 - `scripts/plot_clustalo_motif_figure_matplotlib.py`
-  - Experimental Matplotlib implementation of the same figure
+  - Matplotlib implementation of the same figure
   - Reuses the same inputs, ordering, filtering, and style controls
 
 ## Typical Data Flow

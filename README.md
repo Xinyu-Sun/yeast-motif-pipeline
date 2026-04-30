@@ -38,7 +38,7 @@ SVG plotting.
 Optional plot exports:
 - PNG export with `--png` uses the SVG output and requires Pillow.
 - PDF export with `--pdf` uses the SVG output when system conversion is available, with ReportLab as a fallback.
-- The experimental Matplotlib renderer requires `matplotlib`; see
+- The Matplotlib renderer requires `matplotlib`; see
   `requirements-plotting.txt`.
 
 ## Inputs
@@ -239,9 +239,13 @@ python3 scripts/plot_clustalo_motif_figure.py \
 - Colors: `--dot-fill`, `--dot-stroke`, `--grid-color`, `--background-color`, `--category-color`
 - Legend: `--no-legend`, `--legend-position`, `--legend-x`, `--legend-y`
 
-## Experimental Matplotlib Renderer
+## Matplotlib Renderer
 
-This branch includes a side-by-side Matplotlib implementation:
+The repository includes a side-by-side Matplotlib implementation. It uses the
+same input tables, tree files, filtering, and most layout/style options as the
+native SVG renderer.
+
+Additional notes are in `docs/matplotlib_renderer.md`.
 
 ```bash
 python3 scripts/plot_clustalo_motif_figure_matplotlib.py \

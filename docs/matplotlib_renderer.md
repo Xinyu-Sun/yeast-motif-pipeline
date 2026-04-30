@@ -1,7 +1,7 @@
-# Matplotlib Renderer Exploration
+# Matplotlib Renderer
 
-This branch explores a standard plotting-library renderer for the motif/domain
-matrix figure:
+This renderer provides a standard plotting-library implementation for the
+motif/domain matrix figure:
 
 - Script: `scripts/plot_clustalo_motif_figure_matplotlib.py`
 - Library: Matplotlib
@@ -9,7 +9,7 @@ matrix figure:
   renderer
 - Outputs: SVG by default, with optional PNG/PDF via `--png` and `--pdf`
 
-Install the experimental dependency:
+Install the plotting dependency:
 
 ```bash
 python3 -m pip install -r requirements-plotting.txt
@@ -31,7 +31,6 @@ python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
 
 Notes:
 
-- This is intentionally additive: it does not replace the current hand-authored
-  SVG renderer.
-- The Matplotlib version should make PNG/PDF export more conventional once the
-  layout is tuned to match the native SVG renderer closely enough.
+- This is intentionally additive: it does not replace the native SVG renderer.
+- It is useful when you want Matplotlib-managed SVG, PNG, or PDF output while
+  preserving the same ordering and domain filtering as the native renderer.
