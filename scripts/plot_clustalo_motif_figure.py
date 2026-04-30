@@ -10,6 +10,7 @@ It supports:
 - all-protein and category-specific figures (Pol I / Pol II / Pol III)
 - shared-domain filtering by protein count
 - optional exclusion of MobiDBLite hits
+- optional PNG/PDF export
 - layout and style tuning through CLI arguments and/or JSON config
 """
 
@@ -20,6 +21,9 @@ import csv
 import html
 import json
 import re
+import shutil
+import subprocess
+import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +35,7 @@ DEFAULT_HITS = REPO_ROOT / "data" / "output" / "polymerase_tf_domain_hits_raw.cs
 DEFAULT_PROTEINS = REPO_ROOT / "data" / "output" / "polymerase_tf_proteins.csv"
 DEFAULT_OUT = REPO_ROOT / "data" / "output" / "all48_motif_figure.svg"
 DEFAULT_ORDER_CSV = REPO_ROOT / "data" / "output" / "all48_motif_order.csv"
+SVG_DPI = 96.0
 
 DEFAULT_CATEGORY_COLORS = {
     "Pol I": "#1f77b4",
@@ -40,8 +45,8 @@ DEFAULT_CATEGORY_COLORS = {
 
 DEFAULT_STYLE = {
     "margin_left": 172.0,
-    "margin_right": 18.0,
-    "margin_top": 8.0,
+    "margin_right": 16.0,
+    "margin_top": 0.0,
     "margin_bottom": 12.0,
     "cell_width": 13.0,
     "cell_height": 14.0,
@@ -56,8 +61,9 @@ DEFAULT_STYLE = {
     "domain_label_font_size": 9.5,
     "legend_title_font_size": 10.5,
     "legend_font_size": 9.5,
+    "title_baseline_offset": -3.0,
     "title_subtitle_gap": 18.0,
-    "subtitle_matrix_gap": 24.0,
+    "subtitle_matrix_gap": 8.0,
     "title_line_half_length": 88.0,
     "title_line_offset": 4.0,
     "title_line_width": 1.0,
@@ -205,23 +211,23 @@ def assign_positions(node: Node, leaf_x: Dict[str, float], tree_top: float, tree
     node.y = tree_top + node.height * scale
 
 
-def draw_tree_segments(node: Node, stroke: str, stroke_width: float) -> List[str]:
-    segments: List[str] = []
+def iter_tree_segments(node: Node) -> Iterable[tuple[float, float, float, float]]:
     if node.is_leaf:
-        return segments
+        return
 
     child_x = [child.x for child in node.children]
-    segments.append(
-        f'<line x1="{min(child_x):.2f}" y1="{node.y:.2f}" x2="{max(child_x):.2f}" y2="{node.y:.2f}" '
-        f'stroke="{stroke}" stroke-width="{stroke_width:.2f}" />'
-    )
+    yield min(child_x), node.y, max(child_x), node.y
     for child in node.children:
-        segments.append(
-            f'<line x1="{child.x:.2f}" y1="{child.y:.2f}" x2="{child.x:.2f}" y2="{node.y:.2f}" '
-            f'stroke="{stroke}" stroke-width="{stroke_width:.2f}" />'
-        )
-        segments.extend(draw_tree_segments(child, stroke=stroke, stroke_width=stroke_width))
-    return segments
+        yield child.x, child.y, child.x, node.y
+        yield from iter_tree_segments(child)
+
+
+def draw_tree_segments(node: Node, stroke: str, stroke_width: float) -> List[str]:
+    return [
+        f'<line x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}" '
+        f'stroke="{stroke}" stroke-width="{stroke_width:.2f}" />'
+        for x1, y1, x2, y2 in iter_tree_segments(node)
+    ]
 
 
 def prune_tree(node: Node, keep_labels: set[str]) -> Optional[Node]:
@@ -449,9 +455,9 @@ def determine_legend_position(
         position = "top-left" if width < 420 else "top-right"
 
     if position == "top-left":
-        return 12.0, max(6.0, matrix_top - 52.0)
+        return 12.0, 8.0
     if position == "top-right":
-        return max(width - 165.0, matrix_left + matrix_w - 95.0), max(6.0, matrix_top - 52.0)
+        return max(width - 165.0, matrix_left + matrix_w - 95.0), 8.0
     if position == "bottom-left":
         return 12.0, tree_top + tree_h + 2.0
     if position == "bottom-right":
@@ -460,17 +466,7 @@ def determine_legend_position(
     raise SystemExit(f"Unsupported legend_position: {style['legend_position']!r}")
 
 
-def build_svg(
-    tree: Node,
-    tree_labels: List[str],
-    domain_keys: List[str],
-    ordered_rows: List[dict],
-    out: Path,
-    title: str,
-    subtitle: str,
-    show_legend: bool,
-    style: dict,
-) -> None:
+def prepare_layout(tree: Node, tree_labels: List[str], domain_keys: List[str], style: dict) -> dict:
     margin_left = float(style["margin_left"])
     margin_right = float(style["margin_right"])
     margin_top = float(style["margin_top"])
@@ -483,14 +479,14 @@ def build_svg(
     dendro_bottom_pad = float(style["dendrogram_bottom_padding"])
 
     title_font_size = float(style["title_font_size"])
-    subtitle_font_size = float(style["subtitle_font_size"])
+    title_baseline_offset = float(style.get("title_baseline_offset", 0.0))
     title_subtitle_gap = float(style["title_subtitle_gap"])
     subtitle_matrix_gap = float(style["subtitle_matrix_gap"])
 
     matrix_w = len(tree_labels) * cell_w
     matrix_h = max(len(domain_keys), 1) * cell_h
 
-    title_y = margin_top + title_font_size
+    title_y = margin_top + title_font_size + title_baseline_offset
     subtitle_y = title_y + title_subtitle_gap
     matrix_top = subtitle_y + subtitle_matrix_gap + col_label_h
     matrix_left = margin_left
@@ -509,6 +505,66 @@ def build_svg(
         max_height=max_height,
     )
 
+    return {
+        "margin_left": margin_left,
+        "margin_right": margin_right,
+        "margin_top": margin_top,
+        "margin_bottom": margin_bottom,
+        "cell_w": cell_w,
+        "cell_h": cell_h,
+        "col_label_h": col_label_h,
+        "dendro_gap": dendro_gap,
+        "dendro_h": dendro_h,
+        "dendro_bottom_pad": dendro_bottom_pad,
+        "title_font_size": title_font_size,
+        "subtitle_font_size": float(style["subtitle_font_size"]),
+        "title_baseline_offset": title_baseline_offset,
+        "title_subtitle_gap": title_subtitle_gap,
+        "subtitle_matrix_gap": subtitle_matrix_gap,
+        "matrix_w": matrix_w,
+        "matrix_h": matrix_h,
+        "matrix_top": matrix_top,
+        "matrix_left": matrix_left,
+        "tree_top": tree_top,
+        "width": width,
+        "height": height,
+        "title_x": width / 2.0,
+        "title_y": title_y,
+        "subtitle_y": subtitle_y,
+        "label_y": matrix_top - 2.0,
+    }
+
+
+def build_svg(
+    tree: Node,
+    tree_labels: List[str],
+    domain_keys: List[str],
+    ordered_rows: List[dict],
+    out: Path,
+    title: str,
+    subtitle: str,
+    show_legend: bool,
+    style: dict,
+) -> None:
+    layout = prepare_layout(tree, tree_labels, domain_keys, style)
+    margin_left = layout["margin_left"]
+    cell_w = layout["cell_w"]
+    cell_h = layout["cell_h"]
+    dendro_h = layout["dendro_h"]
+    title_font_size = layout["title_font_size"]
+    subtitle_font_size = layout["subtitle_font_size"]
+    matrix_w = layout["matrix_w"]
+    matrix_h = layout["matrix_h"]
+    matrix_top = layout["matrix_top"]
+    matrix_left = layout["matrix_left"]
+    tree_top = layout["tree_top"]
+    width = layout["width"]
+    height = layout["height"]
+    title_x = layout["title_x"]
+    title_y = layout["title_y"]
+    subtitle_y = layout["subtitle_y"]
+    label_y = layout["label_y"]
+
     category_colors = dict(DEFAULT_CATEGORY_COLORS)
     category_colors.update(style.get("category_colors", {}))
 
@@ -516,7 +572,6 @@ def build_svg(
     pieces.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width:.2f}" height="{height:.2f}" viewBox="0 0 {width:.2f} {height:.2f}">')
     pieces.append(f'<rect width="100%" height="100%" fill="{escape(str(style["background_color"]))}" />')
 
-    title_x = width / 2.0
     pieces.append(
         f'<text x="{title_x:.2f}" y="{title_y:.2f}" text-anchor="middle" font-family="{escape(str(style["font_family"]))}" '
         f'font-size="{title_font_size:.2f}" font-weight="700">{escape(title)}</text>'
@@ -564,7 +619,6 @@ def build_svg(
                 f'font-size="{float(style["legend_font_size"]):.2f}">{escape(category)}</text>'
             )
 
-    label_y = matrix_top - 2.0
     for idx, row in enumerate(ordered_rows):
         short = row.get("standard_name") or row.get("protein") or row.get("y_name")
         x = matrix_left + (idx + 0.5) * cell_w
@@ -624,6 +678,419 @@ def build_svg(
     out.write_text("\n".join(pieces))
 
 
+def parse_color(value: str) -> tuple[int, int, int]:
+    text = str(value).strip().lower()
+    named = {
+        "black": "#000000",
+        "white": "#ffffff",
+        "red": "#ff0000",
+        "green": "#008000",
+        "blue": "#0000ff",
+        "transparent": "#ffffff",
+    }
+    text = named.get(text, text)
+    if text.startswith("#") and len(text) == 4:
+        text = "#" + "".join(ch * 2 for ch in text[1:])
+    if not (text.startswith("#") and len(text) == 7):
+        raise SystemExit(f"PNG/PDF export only supports hex colors like #178b1d, got {value!r}")
+    try:
+        return int(text[1:3], 16), int(text[3:5], 16), int(text[5:7], 16)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid color for PNG/PDF export: {value!r}") from exc
+
+
+def load_pillow():
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+    except ImportError as exc:
+        raise SystemExit(
+            "PNG export requires Pillow. Install it with `python3 -m pip install pillow`, "
+            "or omit --png and use the SVG output."
+        ) from exc
+    return Image, ImageDraw, ImageFont
+
+
+def load_reportlab():
+    try:
+        from reportlab.lib.colors import Color
+        from reportlab.pdfgen import canvas
+    except ImportError as exc:
+        raise SystemExit(
+            "PDF export requires ReportLab. Install it with `python3 -m pip install reportlab`, "
+            "or omit --pdf and use the SVG output."
+        ) from exc
+    return Color, canvas
+
+
+def scaled_font(image_font, size: float):
+    try:
+        return image_font.truetype("Arial.ttf", int(round(size)))
+    except OSError:
+        try:
+            return image_font.truetype("DejaVuSans.ttf", int(round(size)))
+        except OSError:
+            return image_font.load_default()
+
+
+def draw_png_text(draw, image_font, xy: tuple[float, float], text: str, size: float, fill, anchor: str = "la") -> None:
+    draw.text(xy, text, font=scaled_font(image_font, size), fill=fill, anchor=anchor)
+
+
+def draw_rotated_png_text(
+    image_module,
+    image_draw_module,
+    image,
+    image_draw,
+    image_font,
+    x: float,
+    y: float,
+    text: str,
+    size: float,
+    fill,
+) -> None:
+    font = scaled_font(image_font, size)
+    bbox = image_draw.textbbox((0, 0), text, font=font)
+    width = max(1, bbox[2] - bbox[0] + 4)
+    height = max(1, bbox[3] - bbox[1] + 4)
+    text_image = image_module.new("RGBA", (width, height), (255, 255, 255, 0))
+    text_draw = image_draw_module.Draw(text_image)
+    text_draw.text((2 - bbox[0], 2 - bbox[1]), text, font=font, fill=fill)
+    rotated = text_image.rotate(90, expand=True)
+    image.alpha_composite(rotated, (int(round(x)), int(round(y - rotated.height))))
+
+
+def build_png(
+    tree: Node,
+    tree_labels: List[str],
+    domain_keys: List[str],
+    ordered_rows: List[dict],
+    out: Path,
+    title: str,
+    subtitle: str,
+    show_legend: bool,
+    style: dict,
+    dpi: float,
+) -> None:
+    if dpi <= 0:
+        raise SystemExit("--export-dpi must be > 0")
+    Image, ImageDraw, ImageFont = load_pillow()
+    layout = prepare_layout(tree, tree_labels, domain_keys, style)
+    scale = dpi / SVG_DPI
+
+    def sx(value: float) -> float:
+        return value * scale
+
+    category_colors = dict(DEFAULT_CATEGORY_COLORS)
+    category_colors.update(style.get("category_colors", {}))
+    background = parse_color(str(style["background_color"]))
+    image = Image.new("RGBA", (int(round(sx(layout["width"]))), int(round(sx(layout["height"])))), (*background, 255))
+    draw = ImageDraw.Draw(image)
+
+    def color(value: str):
+        return (*parse_color(value), 255)
+
+    frame_color = color(str(style["frame_color"]))
+    grid_color = color(str(style["grid_color"]))
+    tree_color = color(str(style["tree_stroke_color"]))
+    dot_fill = color(str(style["dot_fill"]))
+    dot_stroke = color(str(style["dot_stroke"]))
+
+    title_x = sx(layout["title_x"])
+    title_y = sx(layout["title_y"])
+    draw_png_text(draw, ImageFont, (title_x, title_y), title, sx(layout["title_font_size"]), (0, 0, 0, 255), anchor="mm")
+    line_half = sx(float(style["title_line_half_length"]))
+    line_y = sx(layout["title_y"] + float(style["title_line_offset"]))
+    draw.line((title_x - line_half, line_y, title_x + line_half, line_y), fill=frame_color, width=max(1, int(round(sx(float(style["title_line_width"]))))))
+    draw_png_text(
+        draw,
+        ImageFont,
+        (title_x, sx(layout["subtitle_y"])),
+        subtitle,
+        sx(layout["subtitle_font_size"]),
+        (0, 0, 0, 255),
+        anchor="mm",
+    )
+
+    matrix_left = layout["matrix_left"]
+    matrix_top = layout["matrix_top"]
+    matrix_w = layout["matrix_w"]
+    matrix_h = layout["matrix_h"]
+    cell_w = layout["cell_w"]
+    cell_h = layout["cell_h"]
+
+    if show_legend:
+        legend_x, legend_y = determine_legend_position(
+            style=style,
+            width=layout["width"],
+            matrix_left=matrix_left,
+            matrix_w=matrix_w,
+            matrix_top=matrix_top,
+            matrix_h=matrix_h,
+            tree_top=layout["tree_top"],
+            tree_h=layout["dendro_h"],
+        )
+        draw_png_text(
+            draw,
+            ImageFont,
+            (sx(legend_x), sx(legend_y + 2)),
+            str(style["legend_title"]),
+            sx(float(style["legend_title_font_size"])),
+            (0, 0, 0, 255),
+        )
+        swatch_size = float(style["legend_swatch_size"])
+        row_gap = float(style["legend_row_gap"])
+        for idx, category in enumerate(["Pol I", "Pol II", "Pol III"]):
+            y = legend_y + 12.0 + idx * row_gap
+            fill = color(category_colors.get(category, "#000000"))
+            draw.rectangle(
+                (sx(legend_x), sx(y - swatch_size + 2), sx(legend_x + swatch_size), sx(y + 2)),
+                fill=fill,
+                outline=frame_color,
+                width=max(1, int(round(sx(0.4)))),
+            )
+            draw_png_text(
+                draw,
+                ImageFont,
+                (sx(legend_x + swatch_size + 5), sx(y + 1)),
+                category,
+                sx(float(style["legend_font_size"])),
+                (0, 0, 0, 255),
+            )
+
+    label_y = layout["label_y"]
+    for idx, row in enumerate(ordered_rows):
+        short = row.get("standard_name") or row.get("protein") or row.get("y_name")
+        x = matrix_left + (idx + 0.5) * cell_w
+        fill = color(category_colors.get(row.get("category", ""), "#000000"))
+        draw_rotated_png_text(
+            Image,
+            ImageDraw,
+            image,
+            draw,
+            ImageFont,
+            sx(x),
+            sx(label_y),
+            str(short),
+            sx(float(style["protein_label_font_size"])),
+            fill,
+        )
+
+    grid_width = max(1, int(round(sx(float(style["grid_width"])))))
+    for idx in range(len(tree_labels) + 1):
+        x = matrix_left + idx * cell_w
+        draw.line((sx(x), sx(matrix_top), sx(x), sx(matrix_top + matrix_h)), fill=grid_color, width=grid_width)
+
+    dot_radius = sx(float(style["dot_radius"]))
+    dot_width = max(1, int(round(sx(float(style["dot_stroke_width"])))))
+    for row_idx, domain in enumerate(domain_keys):
+        cy = matrix_top + (row_idx + 0.5) * cell_h
+        label = short_domain_label(domain)
+        draw_png_text(
+            draw,
+            ImageFont,
+            (sx(matrix_left - 8), sx(cy + 3)),
+            label,
+            sx(float(style["domain_label_font_size"])),
+            (0, 0, 0, 255),
+            anchor="ra",
+        )
+        for col_idx, row in enumerate(ordered_rows):
+            raw = str(row.get(domain, "0") or "0").strip()
+            if raw in {"0", "", "0.0"}:
+                continue
+            cx = matrix_left + (col_idx + 0.5) * cell_w
+            draw.ellipse(
+                (sx(cx) - dot_radius, sx(cy) - dot_radius, sx(cx) + dot_radius, sx(cy) + dot_radius),
+                fill=dot_fill,
+                outline=dot_stroke,
+                width=dot_width,
+            )
+
+    tree_width = max(1, int(round(sx(float(style["tree_stroke_width"])))))
+    for x1, y1, x2, y2 in iter_tree_segments(tree):
+        draw.line((sx(x1), sx(y1), sx(x2), sx(y2)), fill=tree_color, width=tree_width)
+
+    frame_width = max(1, int(round(sx(float(style["frame_width"])))))
+    draw.rectangle(
+        (sx(matrix_left), sx(matrix_top), sx(matrix_left + matrix_w), sx(matrix_top + matrix_h)),
+        outline=frame_color,
+        width=frame_width,
+    )
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    image.convert("RGB").save(out, dpi=(dpi, dpi))
+
+
+def build_pdf(
+    tree: Node,
+    tree_labels: List[str],
+    domain_keys: List[str],
+    ordered_rows: List[dict],
+    out: Path,
+    title: str,
+    subtitle: str,
+    show_legend: bool,
+    style: dict,
+) -> None:
+    Color, canvas = load_reportlab()
+    layout = prepare_layout(tree, tree_labels, domain_keys, style)
+
+    def pdf_y(value: float) -> float:
+        return layout["height"] - value
+
+    def set_color(c, value: str) -> None:
+        red, green, blue = parse_color(value)
+        c.setFillColor(Color(red / 255.0, green / 255.0, blue / 255.0))
+        c.setStrokeColor(Color(red / 255.0, green / 255.0, blue / 255.0))
+
+    category_colors = dict(DEFAULT_CATEGORY_COLORS)
+    category_colors.update(style.get("category_colors", {}))
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    c = canvas.Canvas(str(out), pagesize=(layout["width"], layout["height"]))
+    set_color(c, str(style["background_color"]))
+    c.rect(0, 0, layout["width"], layout["height"], fill=1, stroke=0)
+
+    set_color(c, "#000000")
+    c.setFont("Helvetica-Bold", layout["title_font_size"])
+    c.drawCentredString(layout["title_x"], pdf_y(layout["title_y"]), title)
+    set_color(c, str(style["frame_color"]))
+    c.setLineWidth(float(style["title_line_width"]))
+    line_half = float(style["title_line_half_length"])
+    line_y = layout["title_y"] + float(style["title_line_offset"])
+    c.line(layout["title_x"] - line_half, pdf_y(line_y), layout["title_x"] + line_half, pdf_y(line_y))
+    set_color(c, "#000000")
+    c.setFont("Helvetica", layout["subtitle_font_size"])
+    c.drawCentredString(layout["title_x"], pdf_y(layout["subtitle_y"]), subtitle)
+
+    matrix_left = layout["matrix_left"]
+    matrix_top = layout["matrix_top"]
+    matrix_w = layout["matrix_w"]
+    matrix_h = layout["matrix_h"]
+    cell_w = layout["cell_w"]
+    cell_h = layout["cell_h"]
+
+    if show_legend:
+        legend_x, legend_y = determine_legend_position(
+            style=style,
+            width=layout["width"],
+            matrix_left=matrix_left,
+            matrix_w=matrix_w,
+            matrix_top=matrix_top,
+            matrix_h=matrix_h,
+            tree_top=layout["tree_top"],
+            tree_h=layout["dendro_h"],
+        )
+        set_color(c, "#000000")
+        c.setFont("Helvetica-Bold", float(style["legend_title_font_size"]))
+        c.drawString(legend_x, pdf_y(legend_y + 2), str(style["legend_title"]))
+        swatch_size = float(style["legend_swatch_size"])
+        row_gap = float(style["legend_row_gap"])
+        for idx, category in enumerate(["Pol I", "Pol II", "Pol III"]):
+            y = legend_y + 12.0 + idx * row_gap
+            set_color(c, category_colors.get(category, "#000000"))
+            c.rect(legend_x, pdf_y(y + 2), swatch_size, swatch_size, fill=1, stroke=1)
+            set_color(c, "#000000")
+            c.setFont("Helvetica", float(style["legend_font_size"]))
+            c.drawString(legend_x + swatch_size + 5, pdf_y(y + 1), category)
+
+    for idx, row in enumerate(ordered_rows):
+        short = row.get("standard_name") or row.get("protein") or row.get("y_name")
+        x = matrix_left + (idx + 0.5) * cell_w
+        set_color(c, category_colors.get(row.get("category", ""), "#000000"))
+        c.saveState()
+        c.translate(x, pdf_y(layout["label_y"]))
+        c.rotate(90)
+        c.setFont("Helvetica", float(style["protein_label_font_size"]))
+        c.drawString(0, 0, str(short))
+        c.restoreState()
+
+    set_color(c, str(style["grid_color"]))
+    c.setLineWidth(float(style["grid_width"]))
+    for idx in range(len(tree_labels) + 1):
+        x = matrix_left + idx * cell_w
+        c.line(x, pdf_y(matrix_top), x, pdf_y(matrix_top + matrix_h))
+
+    dot_radius = float(style["dot_radius"])
+    for row_idx, domain in enumerate(domain_keys):
+        cy = matrix_top + (row_idx + 0.5) * cell_h
+        label = short_domain_label(domain)
+        set_color(c, "#000000")
+        c.setFont("Helvetica", float(style["domain_label_font_size"]))
+        c.drawRightString(matrix_left - 8, pdf_y(cy + 3), label)
+        for col_idx, row in enumerate(ordered_rows):
+            raw = str(row.get(domain, "0") or "0").strip()
+            if raw in {"0", "", "0.0"}:
+                continue
+            cx = matrix_left + (col_idx + 0.5) * cell_w
+            red, green, blue = parse_color(str(style["dot_fill"]))
+            c.setFillColor(Color(red / 255.0, green / 255.0, blue / 255.0))
+            red, green, blue = parse_color(str(style["dot_stroke"]))
+            c.setStrokeColor(Color(red / 255.0, green / 255.0, blue / 255.0))
+            c.setLineWidth(float(style["dot_stroke_width"]))
+            c.circle(cx, pdf_y(cy), dot_radius, fill=1, stroke=1)
+
+    set_color(c, str(style["tree_stroke_color"]))
+    c.setLineWidth(float(style["tree_stroke_width"]))
+    for x1, y1, x2, y2 in iter_tree_segments(tree):
+        c.line(x1, pdf_y(y1), x2, pdf_y(y2))
+
+    set_color(c, str(style["frame_color"]))
+    c.setLineWidth(float(style["frame_width"]))
+    c.rect(matrix_left, pdf_y(matrix_top + matrix_h), matrix_w, matrix_h, fill=0, stroke=1)
+    c.showPage()
+    c.save()
+
+
+def export_png_from_svg(svg_path: Path, png_path: Path, dpi: float) -> bool:
+    sips = shutil.which("sips")
+    if not sips:
+        return False
+    if dpi <= 0:
+        raise SystemExit("--export-dpi must be > 0")
+
+    Image, _ImageDraw, _ImageFont = load_pillow()
+    png_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_png = Path(tmpdir) / "figure.png"
+        result = subprocess.run(
+            [sips, "-s", "format", "png", str(svg_path), "--out", str(tmp_png)],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if result.returncode != 0 or not tmp_png.exists():
+            return False
+
+        rendered = Image.open(tmp_png).convert("RGBA")
+        white = Image.new("RGBA", rendered.size, (255, 255, 255, 255))
+        white.alpha_composite(rendered)
+        image = white.convert("RGB")
+        if dpi != SVG_DPI:
+            scale = dpi / SVG_DPI
+            width = max(1, int(round(image.width * scale)))
+            height = max(1, int(round(image.height * scale)))
+            image = image.resize((width, height), Image.Resampling.LANCZOS)
+        image.save(png_path, dpi=(dpi, dpi))
+    return True
+
+
+def export_pdf_from_svg(svg_path: Path, pdf_path: Path) -> bool:
+    sips = shutil.which("sips")
+    if not sips:
+        return False
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        [sips, "-s", "format", "pdf", str(svg_path), "--out", str(pdf_path)],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return result.returncode == 0 and pdf_path.exists()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tree", type=Path, default=DEFAULT_TREE)
@@ -631,6 +1098,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--proteins", type=Path, default=DEFAULT_PROTEINS)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--order-csv", type=Path, default=DEFAULT_ORDER_CSV)
+    parser.add_argument("--png", type=Path, help="Optional PNG export path. Requires Pillow.")
+    parser.add_argument("--pdf", type=Path, help="Optional PDF export path. Requires ReportLab.")
+    parser.add_argument("--export-dpi", type=float, default=300.0, help="DPI for PNG export")
 
     parser.add_argument("--title", default="All 48 Protein TFs")
     parser.add_argument("--subtitle", default="Hierarchical Clustering")
@@ -733,10 +1203,12 @@ def build_style(args: argparse.Namespace) -> dict:
 
 
 def validate_style(style: dict) -> None:
+    nonnegative_keys = [
+        "margin_top",
+    ]
     positive_keys = [
         "margin_left",
         "margin_right",
-        "margin_top",
         "margin_bottom",
         "cell_width",
         "cell_height",
@@ -747,6 +1219,10 @@ def validate_style(style: dict) -> None:
         "protein_label_font_size",
         "domain_label_font_size",
     ]
+    for key in nonnegative_keys:
+        value = float(style[key])
+        if value < 0:
+            raise SystemExit(f"Style value {key} must be >= 0, got {value}")
     for key in positive_keys:
         value = float(style[key])
         if value <= 0:
@@ -818,8 +1294,41 @@ def main() -> int:
         show_legend=not args.no_legend,
         style=style,
     )
+    if args.png:
+        exported = export_png_from_svg(args.out, args.png, args.export_dpi)
+        if not exported:
+            build_png(
+                tree=pruned_tree,
+                tree_labels=resolved_tree_labels,
+                domain_keys=domain_keys,
+                ordered_rows=ordered_rows,
+                out=args.png,
+                title=args.title,
+                subtitle=args.subtitle,
+                show_legend=not args.no_legend,
+                style=style,
+                dpi=args.export_dpi,
+            )
+    if args.pdf:
+        exported = export_pdf_from_svg(args.out, args.pdf)
+        if not exported:
+            build_pdf(
+                tree=pruned_tree,
+                tree_labels=resolved_tree_labels,
+                domain_keys=domain_keys,
+                ordered_rows=ordered_rows,
+                out=args.pdf,
+                title=args.title,
+                subtitle=args.subtitle,
+                show_legend=not args.no_legend,
+                style=style,
+            )
 
     print(f"Wrote figure: {args.out}")
+    if args.png:
+        print(f"Wrote PNG: {args.png}")
+    if args.pdf:
+        print(f"Wrote PDF: {args.pdf}")
     print(f"Wrote order table: {args.order_csv}")
     print(f"Proteins plotted: {len(ordered_rows)}")
     print(f"Shared domains plotted: {len(domain_keys)}")
