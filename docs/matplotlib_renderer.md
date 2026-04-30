@@ -1,12 +1,11 @@
 # Matplotlib Renderer
 
-This renderer provides a standard plotting-library implementation for the
+This is the recommended plotting implementation for the
 motif/domain matrix figure:
 
 - Script: `scripts/plot_clustalo_motif_figure_matplotlib.py`
 - Library: Matplotlib
-- Inputs: same tree, hits, proteins, and style config files as the native SVG
-  renderer
+- Inputs: tree, hits, proteins, and optional style config files
 - Outputs: SVG by default, with optional PNG/PDF via `--png` and `--pdf`
 
 Install the plotting dependency:
@@ -31,6 +30,7 @@ python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
 
 Notes:
 
-- This is intentionally additive: it does not replace the native SVG renderer.
-- It is useful when you want Matplotlib-managed SVG, PNG, or PDF output while
-  preserving the same ordering and domain filtering as the native renderer.
+- It preserves the same ordering and domain filtering behavior as the native
+  SVG renderer.
+- For exact Pol I / Pol II / Pol III recreations, use the matching
+  category-specific tree when available.

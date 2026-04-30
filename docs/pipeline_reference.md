@@ -10,16 +10,16 @@
   - Aggregates shared raw domains by category composition
 
 - `scripts/plot_clustalo_motif_figure.py`
-  - Builds SVG motif matrix + dendrogram from tree/hits/proteins tables
+  - Native SVG implementation of the motif matrix + dendrogram
   - Optionally exports PNG and PDF copies of the plot
   - Supports category-specific plots and layout customization via CLI/JSON
 
 - `scripts/plot_clustalo_motif_figure_matplotlib.py`
-  - Matplotlib implementation of the same figure
+  - Recommended Matplotlib implementation of the same figure
   - Reuses the same inputs, ordering, filtering, and style controls
 
 ## Typical Data Flow
 
 1. Protein list (`data/input/*.csv`) or workbook (`data/input/*.xlsx`) -> extraction outputs in `data/output/`
 2. Raw hits table -> shared-domain summary table
-3. Tree + raw hits + proteins table -> SVG figure, optional PNG/PDF exports, and order CSV
+3. Tree + raw hits + proteins table -> Matplotlib SVG figure, optional PNG/PDF exports, and order CSV

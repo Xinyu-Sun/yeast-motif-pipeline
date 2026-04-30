@@ -31,15 +31,23 @@ yeast-motif-pipeline/
 
 - Python 3.9+
 - Internet access for `extract_sgd_domains.py` (calls SGD + InterPro APIs)
+- Matplotlib for figure generation
 
-No non-stdlib Python packages are required for extraction, summarization, or
-SVG plotting.
+No non-stdlib Python packages are required for extraction or summarization.
 
-Optional plot exports:
-- PNG export with `--png` uses the SVG output and requires Pillow.
-- PDF export with `--pdf` uses the SVG output when system conversion is available, with ReportLab as a fallback.
-- The Matplotlib renderer requires `matplotlib`; see
-  `requirements-plotting.txt`.
+## Setup
+
+Create a virtual environment and install the plotting dependency:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements-plotting.txt
+```
+
+The plotting requirements currently install Matplotlib. Extraction and summary
+scripts use only the Python standard library.
 
 ## Inputs
 
@@ -138,10 +146,10 @@ This table reports, per shared raw domain key:
 - category counts and percentages
 - dominant category
 
-### Step 3: Plot all proteins (default figure)
+### Step 3: Plot all proteins with Matplotlib
 
 ```bash
-python3 scripts/plot_clustalo_motif_figure.py \
+python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
   --tree data/input/clustalo-all48.phylotree \
   --hits data/output/polymerase_tf_domain_hits_raw.csv \
   --proteins data/output/polymerase_tf_proteins.csv \
@@ -157,16 +165,18 @@ python3 scripts/plot_clustalo_motif_figure.py \
 Defaults:
 - MobiDBLite is excluded
 - legend is enabled
-- SVG is always written; PNG/PDF are optional exports
+- SVG is written by default; PNG/PDF are optional exports
 
 ## Category-Specific Plotting
 
-You can render Pol I / Pol II / Pol III subsets from the same combined tree (the script prunes the tree automatically).
+You can render Pol I / Pol II / Pol III subsets from the same combined tree
+(the script prunes the tree automatically). For exact category-specific
+recreations, pass the matching category-specific tree if available.
 
 ### Example: Pol II only
 
 ```bash
-python3 scripts/plot_clustalo_motif_figure.py \
+python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
   --category "Pol II" \
   --tree data/input/clustalo-all48.phylotree \
   --hits data/output/polymerase_tf_domain_hits_raw.csv \
@@ -192,7 +202,7 @@ Compact example:
 Run with config:
 
 ```bash
-python3 scripts/plot_clustalo_motif_figure.py \
+python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
   --style-config configs/plot_layout.compact.example.json \
   --out data/output/all48_motif_figure_compact.svg
 ```
@@ -200,14 +210,14 @@ python3 scripts/plot_clustalo_motif_figure.py \
 Generate a fresh default template:
 
 ```bash
-python3 scripts/plot_clustalo_motif_figure.py \
+python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
   --write-default-style-config configs/my_style.json
 ```
 
 ### Option B: Direct CLI overrides
 
 ```bash
-python3 scripts/plot_clustalo_motif_figure.py \
+python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
   --cell-width 12 \
   --cell-height 12 \
   --margin-left 180 \
@@ -241,9 +251,9 @@ python3 scripts/plot_clustalo_motif_figure.py \
 
 ## Matplotlib Renderer
 
-The repository includes a side-by-side Matplotlib implementation. It uses the
-same input tables, tree files, filtering, and most layout/style options as the
-native SVG renderer.
+The Matplotlib renderer is the recommended plotting path. It uses the same
+input tables, tree files, filtering, and most layout/style options as the
+original native SVG renderer.
 
 Additional notes are in `docs/matplotlib_renderer.md`.
 
@@ -257,12 +267,6 @@ python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
   --pdf data/output/all48_motif_figure_matplotlib.pdf
 ```
 
-Install its dependency with:
-
-```bash
-python3 -m pip install -r requirements-plotting.txt
-```
-
 ## Output and Caching Notes
 
 - All generated tables/figures are intended to live in `data/output/`.
@@ -273,4 +277,4 @@ python3 -m pip install -r requirements-plotting.txt
 
 - SGD/InterPro responses can change over time, so exact row counts may drift.
 - If your workbook schema differs from the expected columns, extraction will fail until the mapping is updated.
-- SVG output is native from the plotting script. PNG/PDF export can be done separately if needed, but large generated images/PDFs should not be committed.
+- Large generated images/PDFs should not be committed.
