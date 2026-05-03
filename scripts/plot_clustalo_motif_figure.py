@@ -1096,6 +1096,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tree", type=Path, default=DEFAULT_TREE)
     parser.add_argument("--hits", type=Path, default=DEFAULT_HITS)
     parser.add_argument("--proteins", type=Path, default=DEFAULT_PROTEINS)
+    parser.add_argument("--ptm-intersections", type=Path, help="Known PTM/domain intersection CSV from extract_sgd_domains.py")
+    parser.add_argument("--show-ptm-overlay", action="store_true", help="Overlay known PTM intersection markers on domain dots")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--order-csv", type=Path, default=DEFAULT_ORDER_CSV)
     parser.add_argument("--png", type=Path, help="Optional PNG export path. Requires Pillow.")

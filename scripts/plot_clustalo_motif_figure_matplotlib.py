@@ -40,6 +40,25 @@ def pt(value: float | str) -> float:
     return float(value) * PT_PER_SVG_PX
 
 
+def load_ptm_overlay(path: Path | None) -> set[tuple[str, str]]:
+    if path is None:
+        return set()
+    import csv
+
+    overlay: set[tuple[str, str]] = set()
+    with path.open(newline="", encoding="utf-8-sig") as handle:
+        for row in csv.DictReader(handle):
+            relation = (row.get("domain_relation") or "").strip()
+            if relation not in {"inside_domain", "near_domain_boundary"}:
+                continue
+            y_name = (row.get("y_name") or "").strip()
+            for domain_key in (row.get("matched_raw_domain_keys") or "").split(";"):
+                domain_key = domain_key.strip()
+                if y_name and domain_key:
+                    overlay.add((y_name, domain_key))
+    return overlay
+
+
 def draw_matplotlib_figure(
     tree: base.Node,
     tree_labels: List[str],
@@ -49,6 +68,7 @@ def draw_matplotlib_figure(
     subtitle: str,
     show_legend: bool,
     style: dict,
+    ptm_overlay: set[tuple[str, str]] | None = None,
 ):
     plt, patches = load_matplotlib()
     layout = base.prepare_layout(tree, tree_labels, domain_keys, style)
@@ -67,6 +87,7 @@ def draw_matplotlib_figure(
     category_colors = dict(base.DEFAULT_CATEGORY_COLORS)
     category_colors.update(style.get("category_colors", {}))
     font_family = mpl_font_family(style)
+    ptm_overlay = ptm_overlay or set()
 
     ax.text(
         layout["title_x"],
@@ -204,6 +225,21 @@ def draw_matplotlib_figure(
                     linewidth=pt(style["dot_stroke_width"]),
                 )
             )
+            if (row.get("y_name", ""), domain) in ptm_overlay:
+                ax.plot(
+                    [cx - 2.3, cx + 2.3],
+                    [cy - 2.3, cy + 2.3],
+                    color="#f2c94c",
+                    linewidth=pt(1.15),
+                    solid_capstyle="round",
+                )
+                ax.plot(
+                    [cx - 2.3, cx + 2.3],
+                    [cy + 2.3, cy - 2.3],
+                    color="#f2c94c",
+                    linewidth=pt(1.15),
+                    solid_capstyle="round",
+                )
 
     for x1, y1, x2, y2 in base.iter_tree_segments(tree):
         ax.plot(
@@ -252,6 +288,7 @@ def main() -> int:
     tree_labels = [base.normalize_tree_label(label) for label in raw_tree_labels]
 
     protein_meta = base.read_protein_metadata(args.proteins)
+    ptm_overlay = load_ptm_overlay(args.ptm_intersections) if args.show_ptm_overlay else set()
     domain_keys, matrix_by_y, _tree_rows, missing_from_tree = base.read_domain_hits(
         hits_path=args.hits,
         proteins_path=args.proteins,
@@ -295,6 +332,7 @@ def main() -> int:
         subtitle=args.subtitle,
         show_legend=not args.no_legend,
         style=style,
+        ptm_overlay=ptm_overlay,
     )
 
     save_figure(fig, args.out)
@@ -313,6 +351,8 @@ def main() -> int:
     print(f"Shared domains plotted: {len(domain_keys)}")
     print(f"Excluded MobiDBLite: {args.exclude_mobidblite}")
     print(f"Min proteins threshold: {args.min_proteins}")
+    if args.show_ptm_overlay:
+        print(f"Known PTM overlay markers: {len(ptm_overlay)}")
     if missing_from_tree:
         print("Missing from tree:", ", ".join(missing_from_tree))
     return 0

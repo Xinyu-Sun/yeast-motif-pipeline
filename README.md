@@ -130,7 +130,18 @@ Primary outputs include:
 - `data/output/polymerase_tf_domain_hits_raw.csv`
 - `data/output/polymerase_tf_domain_hits_harmonized.csv`
 - `data/output/polymerase_tf_domain_matrix_*.csv`
+- `data/output/polymerase_tf_ptm_sites_raw.csv`
+- `data/output/polymerase_tf_ptm_sites.csv`
+- `data/output/polymerase_tf_ptm_domain_intersections.csv`
+- `data/output/polymerase_tf_ptm_summary_by_protein.csv`
 - `data/output/run_summary.json`
+
+PTM options:
+- `--skip-ptms`: disable SGD PTM fetching and PTM table outputs.
+- `--ptm-boundary-window 10`: control the amino-acid window used to call a PTM near a domain boundary.
+
+SGD known PTMs are treated as the authoritative PTM evidence layer. Known PTM
+records are cached separately under `data/output/cache/sgd/*.ptms.json`.
 
 ### Step 2: Generate shared-domain category summary table
 
@@ -153,6 +164,8 @@ python3 scripts/plot_clustalo_motif_figure_matplotlib.py \
   --tree data/input/clustalo-all48.phylotree \
   --hits data/output/polymerase_tf_domain_hits_raw.csv \
   --proteins data/output/polymerase_tf_proteins.csv \
+  --ptm-intersections data/output/polymerase_tf_ptm_domain_intersections.csv \
+  --show-ptm-overlay \
   --out data/output/all48_motif_figure.svg \
   --png data/output/all48_motif_figure.png \
   --pdf data/output/all48_motif_figure.pdf \
@@ -166,6 +179,41 @@ Defaults:
 - MobiDBLite is excluded
 - legend is enabled
 - SVG is written by default; PNG/PDF are optional exports
+- PTM overlays are hidden unless `--show-ptm-overlay` is passed
+
+## Optional MTPrompt-PTM Candidate Layer
+
+MTPrompt-PTM is supported as an optional hypothesis-generation layer only. This
+repository does not include MTPrompt source code, model weights, or datasets.
+
+Prepare per-type FASTA inputs for the 13 supported MTPrompt types:
+
+```bash
+python3 scripts/run_mtprompt_ptm.py \
+  --proteins data/output/polymerase_tf_proteins.csv \
+  --outdir data/output/mtprompt_ptm \
+  --prepare-only
+```
+
+Normalize externally generated prediction CSVs:
+
+```bash
+python3 scripts/run_mtprompt_ptm.py \
+  --proteins data/output/polymerase_tf_proteins.csv \
+  --known-ptms data/output/polymerase_tf_ptm_sites.csv \
+  --prediction-dir data/output/mtprompt_ptm/predictions
+```
+
+Outputs:
+- `data/output/polymerase_tf_ptm_predictions_mtprompt.csv`
+- `data/output/polymerase_tf_ptm_candidate_sites.csv`
+
+Candidate evidence tiers are kept separate:
+- `known_sgd`: SGD known PTM site, whether or not MTPrompt predicts it.
+- `predicted_known_overlap`: MTPrompt prediction at a matching SGD known site.
+- `predicted_novel`: MTPrompt prediction with no matching SGD known site.
+
+Predicted-only sites are never merged into known PTM counts.
 
 ## Category-Specific Plotting
 

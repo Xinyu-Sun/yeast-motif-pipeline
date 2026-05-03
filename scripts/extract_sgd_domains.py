@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 import sys
 import time
 from collections import Counter, defaultdict
@@ -61,6 +62,16 @@ INTERPRO_MEMBER_TO_SOURCE = {
     "ssf": "SUPERFAMILY",
 }
 
+PTM_FAMILY_PATTERNS = [
+    ("phosphorylation", re.compile(r"phospho|phosphorylat", re.IGNORECASE)),
+    ("ubiquitination", re.compile(r"ubiquitin", re.IGNORECASE)),
+    ("sumoylation", re.compile(r"sumo", re.IGNORECASE)),
+    ("acetylation", re.compile(r"acetyl", re.IGNORECASE)),
+    ("methylation", re.compile(r"methyl", re.IGNORECASE)),
+    ("succinylation", re.compile(r"succinyl", re.IGNORECASE)),
+    ("palmitoylation", re.compile(r"palmitoyl", re.IGNORECASE)),
+]
+
 CSV_FIELD_ALIASES = {
     "category": ("category", "group", "polymerase", "pol", "class"),
     "protein": ("protein", "protein_name", "name", "gene", "standard_name"),
@@ -95,6 +106,23 @@ def clean_text(value: str | None) -> str:
 def join_sorted(values: Iterable[str], sep: str = "; ") -> str:
     cleaned = sorted({clean_text(v) for v in values if clean_text(v)})
     return sep.join(cleaned)
+
+
+def normalize_ptm_family(text: str | None) -> str:
+    value = clean_text(text)
+    for family, pattern in PTM_FAMILY_PATTERNS:
+        if pattern.search(value):
+            return family
+    return "other"
+
+
+def int_or_none(value: object) -> int | None:
+    try:
+        if value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_fasta_cell(raw: str) -> Tuple[str, str]:
@@ -288,10 +316,12 @@ def fetch_sgd_records(
     sleep_seconds: float,
     force_refresh: bool,
     timeout: float,
-) -> Tuple[List[dict], List[dict], List[dict]]:
+    fetch_ptms: bool = True,
+) -> Tuple[List[dict], List[dict], List[dict], List[dict]]:
     cache_dir = outdir / "cache" / "sgd"
     protein_rows: List[dict] = []
     domain_rows: List[dict] = []
+    ptm_rows: List[dict] = []
     failures: List[dict] = []
 
     for idx, protein in enumerate(proteins, start=1):
@@ -303,12 +333,15 @@ def fetch_sgd_records(
         encoded = quote(y_name, safe="")
         locus_url = f"{SGD_BASE}/{encoded}"
         domains_url = f"{SGD_BASE}/{encoded}/protein_domain_details"
+        ptms_url = f"{SGD_BASE}/{encoded}/posttranslational_details"
         locus_cache = cache_dir / f"{y_name}.locus.json"
         domains_cache = cache_dir / f"{y_name}.domains.json"
+        ptms_cache = cache_dir / f"{y_name}.ptms.json"
 
         try:
             locus = cached_json(locus_url, locus_cache, force_refresh, timeout)
             domains = cached_json(domains_url, domains_cache, force_refresh, timeout)
+            ptms = cached_json(ptms_url, ptms_cache, force_refresh, timeout) if fetch_ptms else []
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
             failures.append({"y_name": y_name, "protein": protein["protein"], "error": str(exc)})
             continue
@@ -359,10 +392,205 @@ def fetch_sgd_records(
                     }
                 )
 
+        if isinstance(ptms, list):
+            ptm_rows.extend(flatten_sgd_ptm_records(protein=protein, protein_row=protein_row, ptm_records=ptms))
+
         if sleep_seconds and idx < len(proteins):
             time.sleep(sleep_seconds)
 
-    return protein_rows, domain_rows, failures
+    return protein_rows, domain_rows, ptm_rows, failures
+
+
+def flatten_sgd_ptm_records(protein: dict, protein_row: dict, ptm_records: List[dict]) -> List[dict]:
+    rows: List[dict] = []
+    for record in ptm_records:
+        if not isinstance(record, dict):
+            continue
+        reference = record.get("reference", {}) if isinstance(record.get("reference"), dict) else {}
+        source = record.get("source", {}) if isinstance(record.get("source"), dict) else {}
+        locus_part = record.get("locus", {}) if isinstance(record.get("locus"), dict) else {}
+        ptm_type = clean_text(record.get("type"))
+        pubmed_id = clean_text(reference.get("pubmed_id"))
+        reference_link = clean_text(reference.get("link"))
+        rows.append(
+            {
+                "category": protein.get("category", ""),
+                "protein": protein.get("protein", ""),
+                "y_name": protein.get("y_name", ""),
+                "accession": protein.get("accession", ""),
+                "sgdid": protein_row.get("sgdid", ""),
+                "standard_name": protein_row.get("standard_name", ""),
+                "systematic_name": protein_row.get("systematic_name", protein.get("y_name", "")),
+                "uniprot_id": protein_row.get("uniprot_id", ""),
+                "ptm_evidence_id": clean_text(record.get("id")),
+                "ptm_type": ptm_type,
+                "ptm_family": normalize_ptm_family(ptm_type),
+                "site_index": clean_text(record.get("site_index")),
+                "site_residue": clean_text(record.get("site_residue")).upper(),
+                "source": clean_text(source.get("display_name") or source.get("format_name")),
+                "reference": clean_text(reference.get("display_name")),
+                "pubmed_id": pubmed_id,
+                "reference_link": f"https://www.yeastgenome.org{reference_link}" if reference_link else "",
+                "locus_display_name": clean_text(locus_part.get("display_name")),
+                "locus_format_name": clean_text(locus_part.get("format_name")),
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            row.get("category", ""),
+            row.get("protein", ""),
+            int_or_none(row.get("site_index")) or 0,
+            row.get("ptm_family", ""),
+            row.get("ptm_evidence_id", ""),
+        )
+    )
+    return rows
+
+
+def collapse_ptm_evidence(ptm_rows: List[dict]) -> List[dict]:
+    grouped: Dict[Tuple[str, str, str, str], dict] = {}
+    for row in ptm_rows:
+        key = (
+            row.get("y_name", ""),
+            clean_text(row.get("site_index", "")),
+            clean_text(row.get("site_residue", "")).upper(),
+            row.get("ptm_family", ""),
+        )
+        group = grouped.setdefault(
+            key,
+            {
+                "category": row.get("category", ""),
+                "protein": row.get("protein", ""),
+                "y_name": row.get("y_name", ""),
+                "accession": row.get("accession", ""),
+                "sgdid": row.get("sgdid", ""),
+                "standard_name": row.get("standard_name", ""),
+                "systematic_name": row.get("systematic_name", ""),
+                "uniprot_id": row.get("uniprot_id", ""),
+                "site_index": row.get("site_index", ""),
+                "site_residue": row.get("site_residue", ""),
+                "ptm_family": row.get("ptm_family", ""),
+                "evidence_record_count": 0,
+                "ptm_types": set(),
+                "ptm_evidence_ids": set(),
+                "sources": set(),
+                "references": set(),
+                "pubmed_ids": set(),
+            },
+        )
+        group["evidence_record_count"] += 1
+        group["ptm_types"].add(row.get("ptm_type", ""))
+        group["ptm_evidence_ids"].add(row.get("ptm_evidence_id", ""))
+        group["sources"].add(row.get("source", ""))
+        group["references"].add(row.get("reference", ""))
+        group["pubmed_ids"].add(row.get("pubmed_id", ""))
+
+    collapsed: List[dict] = []
+    for group in grouped.values():
+        collapsed.append(
+            {
+                **{k: v for k, v in group.items() if not isinstance(v, set)},
+                "ptm_types": join_sorted(group["ptm_types"]),
+                "ptm_evidence_ids": join_sorted(group["ptm_evidence_ids"]),
+                "sources": join_sorted(group["sources"]),
+                "references": join_sorted(group["references"]),
+                "pubmed_ids": join_sorted(group["pubmed_ids"], sep=";"),
+            }
+        )
+    collapsed.sort(
+        key=lambda row: (
+            row.get("category", ""),
+            row.get("protein", ""),
+            int_or_none(row.get("site_index")) or 0,
+            row.get("ptm_family", ""),
+        )
+    )
+    return collapsed
+
+
+def classify_ptm_domain_relation(ptm_site: int | None, domains: List[dict], boundary_window: int) -> Tuple[str, List[dict]]:
+    if ptm_site is None:
+        return "unknown_site", []
+    if not domains:
+        return "no_domains", []
+
+    boundary_matches: List[dict] = []
+    for domain in domains:
+        start = int_or_none(domain.get("start"))
+        end = int_or_none(domain.get("end"))
+        if start is None or end is None:
+            continue
+        if start > end:
+            start, end = end, start
+        if start <= ptm_site <= end:
+            return "inside_domain", [domain]
+        distance = min(abs(ptm_site - start), abs(ptm_site - end))
+        if distance <= boundary_window:
+            boundary_matches.append(domain)
+    if boundary_matches:
+        return "near_domain_boundary", boundary_matches
+    return "outside_domains", []
+
+
+def build_ptm_domain_intersections(
+    collapsed_ptms: List[dict],
+    domain_rows: List[dict],
+    boundary_window: int,
+) -> List[dict]:
+    domains_by_y: Dict[str, List[dict]] = defaultdict(list)
+    for row in domain_rows:
+        if row.get("y_name"):
+            domains_by_y[row["y_name"]].append(row)
+
+    rows: List[dict] = []
+    for ptm in collapsed_ptms:
+        domains = domains_by_y.get(ptm.get("y_name", ""), [])
+        relation, matches = classify_ptm_domain_relation(int_or_none(ptm.get("site_index")), domains, boundary_window)
+        matched_keys = [m.get("raw_domain_key", "") for m in matches]
+        matched_ranges = [
+            f"{clean_text(m.get('start'))}-{clean_text(m.get('end'))}" for m in matches if clean_text(m.get("start")) or clean_text(m.get("end"))
+        ]
+        matched_sources = [m.get("source", "") for m in matches]
+        out = dict(ptm)
+        out.update(
+            {
+                "domain_relation": relation,
+                "boundary_window": boundary_window,
+                "matched_domain_count": len(matches),
+                "matched_raw_domain_keys": join_sorted(matched_keys),
+                "matched_domain_ranges": join_sorted(matched_ranges),
+                "matched_domain_sources": join_sorted(matched_sources),
+            }
+        )
+        rows.append(out)
+    return rows
+
+
+def summarize_ptms_by_protein(collapsed_ptms: List[dict], proteins: List[dict]) -> List[dict]:
+    families = [family for family, _pattern in PTM_FAMILY_PATTERNS] + ["other"]
+    counts_by_y: Dict[str, Counter] = defaultdict(Counter)
+    evidence_by_y: Dict[str, int] = defaultdict(int)
+    for row in collapsed_ptms:
+        y_name = row.get("y_name", "")
+        family = row.get("ptm_family", "other") or "other"
+        counts_by_y[y_name][family] += 1
+        evidence_by_y[y_name] += int_or_none(row.get("evidence_record_count")) or 0
+
+    rows: List[dict] = []
+    for protein in proteins:
+        y_name = protein.get("y_name", "")
+        counter = counts_by_y.get(y_name, Counter())
+        row = {
+            "category": protein.get("category", ""),
+            "protein": protein.get("protein", ""),
+            "y_name": y_name,
+            "known_ptm_site_count": sum(counter.values()),
+            "known_ptm_evidence_record_count": evidence_by_y.get(y_name, 0),
+        }
+        for family in families:
+            row[f"{family}_site_count"] = counter.get(family, 0)
+        rows.append(row)
+    return rows
 
 
 def fetch_interpro_harmonization(
@@ -692,6 +920,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout in seconds")
     parser.add_argument("--min-proteins-per-domain", type=int, default=2, help="Minimum protein count for filtered matrices")
     parser.add_argument("--force-refresh", action="store_true", help="Ignore cached API responses and fetch again")
+    parser.add_argument("--skip-ptms", action="store_true", help="Disable SGD PTM fetching and PTM output tables")
+    parser.add_argument(
+        "--ptm-boundary-window",
+        type=int,
+        default=10,
+        help="Amino-acid distance from a domain start/end that counts as near-boundary for PTM intersections",
+    )
     return parser.parse_args()
 
 
@@ -711,12 +946,16 @@ def main() -> int:
         combined_entries = extract_combined_entries(sheet, category_by_yname)
         validate_workbook_counts(category_entries, combined_entries)
 
-    protein_rows, raw_domain_rows, sgd_failures = fetch_sgd_records(
+    if args.ptm_boundary_window < 0:
+        raise SystemExit("--ptm-boundary-window must be >= 0")
+
+    protein_rows, raw_domain_rows, raw_ptm_rows, sgd_failures = fetch_sgd_records(
         proteins=combined_entries,
         outdir=args.outdir,
         sleep_seconds=args.sleep_seconds,
         force_refresh=args.force_refresh,
         timeout=args.timeout,
+        fetch_ptms=not args.skip_ptms,
     )
     interpro_mappings, interpro_failures = fetch_interpro_harmonization(
         protein_rows=protein_rows,
@@ -728,6 +967,13 @@ def main() -> int:
     annotated_rows = annotate_harmonization(raw_domain_rows, interpro_mappings)
     collapsed_harmonized_rows = collapse_harmonized_hits(annotated_rows)
     source_summary_rows = build_source_summary(annotated_rows)
+    collapsed_ptm_rows = collapse_ptm_evidence(raw_ptm_rows)
+    ptm_intersection_rows = build_ptm_domain_intersections(
+        collapsed_ptms=collapsed_ptm_rows,
+        domain_rows=annotated_rows,
+        boundary_window=args.ptm_boundary_window,
+    )
+    ptm_summary_rows = summarize_ptms_by_protein(collapsed_ptm_rows, protein_rows)
 
     (
         raw_all_matrix_rows,
@@ -834,6 +1080,70 @@ def main() -> int:
         "ambiguous_unique_raw_domain_keys",
     ]
     failure_fields = ["y_name", "protein", "error"]
+    ptm_raw_fields = [
+        "category",
+        "protein",
+        "y_name",
+        "accession",
+        "sgdid",
+        "standard_name",
+        "systematic_name",
+        "uniprot_id",
+        "ptm_evidence_id",
+        "ptm_type",
+        "ptm_family",
+        "site_index",
+        "site_residue",
+        "source",
+        "reference",
+        "pubmed_id",
+        "reference_link",
+        "locus_display_name",
+        "locus_format_name",
+    ]
+    ptm_collapsed_fields = [
+        "category",
+        "protein",
+        "y_name",
+        "accession",
+        "sgdid",
+        "standard_name",
+        "systematic_name",
+        "uniprot_id",
+        "site_index",
+        "site_residue",
+        "ptm_family",
+        "evidence_record_count",
+        "ptm_types",
+        "ptm_evidence_ids",
+        "sources",
+        "references",
+        "pubmed_ids",
+    ]
+    ptm_intersection_fields = [
+        *ptm_collapsed_fields,
+        "domain_relation",
+        "boundary_window",
+        "matched_domain_count",
+        "matched_raw_domain_keys",
+        "matched_domain_ranges",
+        "matched_domain_sources",
+    ]
+    ptm_summary_fields = [
+        "category",
+        "protein",
+        "y_name",
+        "known_ptm_site_count",
+        "known_ptm_evidence_record_count",
+        "phosphorylation_site_count",
+        "ubiquitination_site_count",
+        "sumoylation_site_count",
+        "acetylation_site_count",
+        "methylation_site_count",
+        "succinylation_site_count",
+        "palmitoylation_site_count",
+        "other_site_count",
+    ]
 
     outdir = args.outdir
     write_csv(outdir / "polymerase_tf_proteins.csv", protein_rows, protein_fields)
@@ -843,6 +1153,15 @@ def main() -> int:
     write_csv(outdir / "polymerase_tf_domain_source_summary.csv", source_summary_rows, source_summary_fields)
     write_csv(outdir / "sgd_failures.csv", sgd_failures, failure_fields)
     write_csv(outdir / "interpro_failures.csv", interpro_failures, failure_fields)
+    if not args.skip_ptms:
+        write_csv(outdir / "polymerase_tf_ptm_sites_raw.csv", raw_ptm_rows, ptm_raw_fields)
+        write_csv(outdir / "polymerase_tf_ptm_sites.csv", collapsed_ptm_rows, ptm_collapsed_fields)
+        write_csv(
+            outdir / "polymerase_tf_ptm_domain_intersections.csv",
+            ptm_intersection_rows,
+            ptm_intersection_fields,
+        )
+        write_csv(outdir / "polymerase_tf_ptm_summary_by_protein.csv", ptm_summary_rows, ptm_summary_fields)
 
     write_csv(
         outdir / "polymerase_tf_domain_matrix_all.csv",
@@ -909,6 +1228,12 @@ def main() -> int:
         "raw": raw_summary,
         "harmonized": harmonized_summary,
         "source_summary": source_summary_rows,
+        "ptms": {
+            "enabled": not args.skip_ptms,
+            "boundary_window": args.ptm_boundary_window,
+            "evidence_record_count": len(raw_ptm_rows),
+            "known_site_count": len(collapsed_ptm_rows),
+        },
         "sgd_failure_count": len(sgd_failures),
         "interpro_failure_count": len(interpro_failures),
     }
@@ -932,6 +1257,12 @@ def main() -> int:
         f"Unique domains in at least {args.min_proteins_per_domain} proteins: {harmonized_summary['unique_domains_min_count']}"
     )
     print(f"Failures: {harmonized_summary['failure_count']}")
+
+    if not args.skip_ptms:
+        print("\nKnown SGD PTMs")
+        print(f"Evidence records: {len(raw_ptm_rows)}")
+        print(f"Collapsed known sites: {len(collapsed_ptm_rows)}")
+        print(f"Boundary window: {args.ptm_boundary_window} aa")
 
     print("\nSource summary")
     for row in source_summary_rows:
