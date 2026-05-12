@@ -18,7 +18,20 @@ PT_PER_SVG_PX = 72.0 / base.SVG_DPI
 
 
 def load_matplotlib():
+    import subprocess
+
+    real_check_output = subprocess.check_output
+
+    def check_output_without_slow_font_probes(cmd, *args, **kwargs):
+        if isinstance(cmd, (list, tuple)) and cmd and cmd[0] in {"fc-list", "system_profiler"}:
+            raise subprocess.CalledProcessError(1, cmd)
+        return real_check_output(cmd, *args, **kwargs)
+
     try:
+        subprocess.check_output = check_output_without_slow_font_probes
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
         import matplotlib.pyplot as plt
         from matplotlib import patches
     except ImportError as exc:
@@ -26,6 +39,8 @@ def load_matplotlib():
             "The Matplotlib renderer requires matplotlib. "
             "Install it with `python3 -m pip install matplotlib`."
         ) from exc
+    finally:
+        subprocess.check_output = real_check_output
     return plt, patches
 
 

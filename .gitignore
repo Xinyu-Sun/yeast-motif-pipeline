@@ -8,6 +8,10 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
+.venv-*/
+.uv-bootstrap/
+.uv-cache/
+.matplotlib-cache*/
 
 # OS/editor
 .DS_Store
