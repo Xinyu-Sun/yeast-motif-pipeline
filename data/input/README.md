@@ -23,6 +23,7 @@ Optional columns:
 - `category`: group label such as `Pol I`, `Pol II`, or `Pol III`.
 - `protein`: display name.
 - `accession`: accession identifier.
+- `pol_i_subgroup`: optional Pol I subgroup such as `axial` or `periaxial`.
 - `fasta_header`: FASTA header without sequence.
 - `amino_acid_sequence`: protein sequence without FASTA header.
 - `raw_fasta`: complete FASTA cell, including header and sequence.
@@ -35,4 +36,11 @@ Notes:
 - Workbook files are ignored by `.gitignore` to avoid committing local or sensitive data.
 - Local CSV input files are ignored by `.gitignore`; example files named
   `*.example.csv` are tracked.
+- Tree files (`*.phylotree`, `*.nwk`) and EBI job-id files are ignored too,
+  except the original `clustalo-all48.phylotree`.
+- `scripts/build_pol1_extended_input.py` can generate an all-48 plus Pol I
+  axial/peri-axial CSV from the Pol I peri-axial workbook.
+- `scripts/run_clustalo_tree.py` can regenerate `.fasta`, `.clu`, `.distmat`,
+  and `.phylotree` files from any protein CSV with sequences, using either a
+  local Clustal Omega binary or the EMBL-EBI Job Dispatcher REST service.
 - The plotting script can also use a different tree path via `--tree`.

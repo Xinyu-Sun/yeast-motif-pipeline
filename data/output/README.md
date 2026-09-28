@@ -11,6 +11,8 @@ Expected outputs:
 - `polymerase_tf_domain_matrix_*.csv`
 - `all48_shared_domain_category_summary.csv`
 - figure outputs such as `*.svg` and order tables such as `*_order.csv`
+- `*.plot.json` figure descriptions written by the plotting scripts
+- `index.html` from `scripts/build_output_index.py`: open it in a browser to browse all figures and tables
 - cached API responses in `cache/`
 
 This directory is intentionally git-ignored (except this README) to keep the repository lightweight.

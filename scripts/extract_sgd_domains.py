@@ -86,7 +86,22 @@ CSV_FIELD_ALIASES = {
         "aa_sequence",
     ),
     "raw_fasta": ("raw_fasta", "raw fasta", "fasta"),
+    "pol_i_subgroup": (
+        "pol_i_subgroup",
+        "pol i subgroup",
+        "pol_i_class",
+        "pol i class",
+        "pol_i_role",
+        "pol i role",
+        "axis_class",
+        "axis class",
+        "subgroup",
+    ),
+    "source_table": ("source_table", "source table", "source"),
+    "source_row": ("source_row", "source row"),
+    "source_note": ("source_note", "source note", "note", "notes"),
 }
+OPTIONAL_METADATA_FIELDS = ["pol_i_subgroup", "source_table", "source_row", "source_note"]
 
 
 def col_to_num(col: str) -> int:
@@ -148,6 +163,15 @@ def csv_value(row: dict, field: str) -> str:
     return ""
 
 
+def extra_metadata(row: dict) -> dict:
+    return {field: row.get(field, "") for field in OPTIONAL_METADATA_FIELDS if clean_text(row.get(field, ""))}
+
+
+def detected_metadata_fields(rows: Iterable[dict]) -> List[str]:
+    buffered = list(rows)
+    return [field for field in OPTIONAL_METADATA_FIELDS if any(clean_text(row.get(field, "")) for row in buffered)]
+
+
 def read_csv_entries(path: Path) -> List[dict]:
     entries: List[dict] = []
     seen_y_names: set[str] = set()
@@ -191,6 +215,11 @@ def read_csv_entries(path: Path) -> List[dict]:
                     "fasta_header": header,
                     "amino_acid_sequence": sequence.replace(" ", "").replace("\n", ""),
                     "raw_fasta": raw_fasta,
+                    **{
+                        field: csv_value(row, field)
+                        for field in OPTIONAL_METADATA_FIELDS
+                        if csv_value(row, field)
+                    },
                 }
             )
 
@@ -373,6 +402,7 @@ def fetch_sgd_records(
                         "protein": protein["protein"],
                         "y_name": protein["y_name"],
                         "accession": protein["accession"],
+                        **extra_metadata(protein),
                         "sgdid": protein_row.get("sgdid", ""),
                         "standard_name": protein_row.get("standard_name", ""),
                         "systematic_name": protein_row.get("systematic_name", protein["y_name"]),
@@ -418,6 +448,7 @@ def flatten_sgd_ptm_records(protein: dict, protein_row: dict, ptm_records: List[
                 "protein": protein.get("protein", ""),
                 "y_name": protein.get("y_name", ""),
                 "accession": protein.get("accession", ""),
+                **extra_metadata(protein),
                 "sgdid": protein_row.get("sgdid", ""),
                 "standard_name": protein_row.get("standard_name", ""),
                 "systematic_name": protein_row.get("systematic_name", protein.get("y_name", "")),
@@ -463,6 +494,7 @@ def collapse_ptm_evidence(ptm_rows: List[dict]) -> List[dict]:
                 "protein": row.get("protein", ""),
                 "y_name": row.get("y_name", ""),
                 "accession": row.get("accession", ""),
+                **extra_metadata(row),
                 "sgdid": row.get("sgdid", ""),
                 "standard_name": row.get("standard_name", ""),
                 "systematic_name": row.get("systematic_name", ""),
@@ -584,6 +616,7 @@ def summarize_ptms_by_protein(collapsed_ptms: List[dict], proteins: List[dict]) 
             "category": protein.get("category", ""),
             "protein": protein.get("protein", ""),
             "y_name": y_name,
+            **extra_metadata(protein),
             "known_ptm_site_count": sum(counter.values()),
             "known_ptm_evidence_record_count": evidence_by_y.get(y_name, 0),
         }
@@ -711,6 +744,7 @@ def collapse_harmonized_hits(annotated_rows: List[dict]) -> List[dict]:
                 "protein": row.get("protein", ""),
                 "y_name": row.get("y_name", ""),
                 "accession": row.get("accession", ""),
+                **extra_metadata(row),
                 "sgdid": row.get("sgdid", ""),
                 "standard_name": row.get("standard_name", ""),
                 "systematic_name": row.get("systematic_name", ""),
@@ -798,6 +832,7 @@ def build_domain_matrices(
                 "category": protein["category"],
                 "protein": protein["protein"],
                 "y_name": protein["y_name"],
+                **extra_metadata(protein),
             }
             counts = domain_counts_by_protein.get(y_name, Counter())
             for domain in domain_list:
@@ -945,6 +980,7 @@ def main() -> int:
         category_entries, category_by_yname = extract_category_entries(sheet)
         combined_entries = extract_combined_entries(sheet, category_by_yname)
         validate_workbook_counts(category_entries, combined_entries)
+    metadata_fields = detected_metadata_fields(combined_entries)
 
     if args.ptm_boundary_window < 0:
         raise SystemExit("--ptm-boundary-window must be >= 0")
@@ -1005,6 +1041,7 @@ def main() -> int:
         "protein",
         "y_name",
         "accession",
+        *metadata_fields,
         "sgdid",
         "standard_name",
         "systematic_name",
@@ -1019,6 +1056,7 @@ def main() -> int:
         "protein",
         "y_name",
         "accession",
+        *metadata_fields,
         "sgdid",
         "standard_name",
         "systematic_name",
@@ -1050,6 +1088,7 @@ def main() -> int:
         "protein",
         "y_name",
         "accession",
+        *metadata_fields,
         "sgdid",
         "standard_name",
         "systematic_name",
@@ -1085,6 +1124,7 @@ def main() -> int:
         "protein",
         "y_name",
         "accession",
+        *metadata_fields,
         "sgdid",
         "standard_name",
         "systematic_name",
@@ -1106,6 +1146,7 @@ def main() -> int:
         "protein",
         "y_name",
         "accession",
+        *metadata_fields,
         "sgdid",
         "standard_name",
         "systematic_name",
@@ -1133,6 +1174,7 @@ def main() -> int:
         "category",
         "protein",
         "y_name",
+        *metadata_fields,
         "known_ptm_site_count",
         "known_ptm_evidence_record_count",
         "phosphorylation_site_count",
@@ -1166,42 +1208,42 @@ def main() -> int:
     write_csv(
         outdir / "polymerase_tf_domain_matrix_all.csv",
         raw_all_matrix_rows,
-        ["category", "protein", "y_name", *raw_all_domains],
+        ["category", "protein", "y_name", *metadata_fields, *raw_all_domains],
     )
     write_csv(
         outdir / f"polymerase_tf_domain_matrix_min{args.min_proteins_per_domain}.csv",
         raw_filtered_matrix_rows,
-        ["category", "protein", "y_name", *raw_filtered_domains],
+        ["category", "protein", "y_name", *metadata_fields, *raw_filtered_domains],
     )
     write_csv(
         outdir / "polymerase_tf_domain_matrix_counts_all.csv",
         raw_all_count_matrix_rows,
-        ["category", "protein", "y_name", *raw_all_domains],
+        ["category", "protein", "y_name", *metadata_fields, *raw_all_domains],
     )
     write_csv(
         outdir / f"polymerase_tf_domain_matrix_counts_min{args.min_proteins_per_domain}.csv",
         raw_filtered_count_matrix_rows,
-        ["category", "protein", "y_name", *raw_filtered_domains],
+        ["category", "protein", "y_name", *metadata_fields, *raw_filtered_domains],
     )
     write_csv(
         outdir / "polymerase_tf_domain_matrix_harmonized_all.csv",
         harm_all_matrix_rows,
-        ["category", "protein", "y_name", *harm_all_domains],
+        ["category", "protein", "y_name", *metadata_fields, *harm_all_domains],
     )
     write_csv(
         outdir / f"polymerase_tf_domain_matrix_harmonized_min{args.min_proteins_per_domain}.csv",
         harm_filtered_matrix_rows,
-        ["category", "protein", "y_name", *harm_filtered_domains],
+        ["category", "protein", "y_name", *metadata_fields, *harm_filtered_domains],
     )
     write_csv(
         outdir / "polymerase_tf_domain_matrix_harmonized_counts_all.csv",
         harm_all_count_matrix_rows,
-        ["category", "protein", "y_name", *harm_all_domains],
+        ["category", "protein", "y_name", *metadata_fields, *harm_all_domains],
     )
     write_csv(
         outdir / f"polymerase_tf_domain_matrix_harmonized_counts_min{args.min_proteins_per_domain}.csv",
         harm_filtered_count_matrix_rows,
-        ["category", "protein", "y_name", *harm_filtered_domains],
+        ["category", "protein", "y_name", *metadata_fields, *harm_filtered_domains],
     )
 
     raw_summary = summarize_run(
@@ -1225,6 +1267,12 @@ def main() -> int:
         "input_csv": str(args.csv) if args.csv else "",
         "output_directory": str(outdir),
         "category_counts": Counter(entry["category"] for entry in combined_entries),
+        "metadata_fields": metadata_fields,
+        "pol_i_subgroup_counts": Counter(
+            entry.get("pol_i_subgroup", "")
+            for entry in combined_entries
+            if entry.get("category") == "Pol I" and entry.get("pol_i_subgroup")
+        ),
         "raw": raw_summary,
         "harmonized": harmonized_summary,
         "source_summary": source_summary_rows,

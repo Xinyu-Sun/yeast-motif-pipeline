@@ -27,6 +27,11 @@ data/input/*.xlsx
 data/input/*.xls
 data/input/*.csv
 !data/input/*.example.csv
+# Trees and EBI job ids are lab data too; only the original public tree is tracked.
+data/input/*.phylotree
+!data/input/clustalo-all48.phylotree
+data/input/*.nwk
+data/input/*-job.txt
 data/input/*.tsv
 data/input/*.fa
 data/input/*.fasta

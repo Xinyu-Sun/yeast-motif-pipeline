@@ -33,7 +33,7 @@ def main() -> int:
     args = parser.parse_args()
 
     grouped = {}
-    with args.hits.open() as handle:
+    with args.hits.open(newline='', encoding='utf-8-sig') as handle:
         reader = csv.DictReader(handle)
         for row in reader:
             raw_key = (row.get('raw_domain_key') or '').strip()

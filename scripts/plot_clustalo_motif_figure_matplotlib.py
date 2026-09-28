@@ -55,25 +55,6 @@ def pt(value: float | str) -> float:
     return float(value) * PT_PER_SVG_PX
 
 
-def load_ptm_overlay(path: Path | None) -> set[tuple[str, str]]:
-    if path is None:
-        return set()
-    import csv
-
-    overlay: set[tuple[str, str]] = set()
-    with path.open(newline="", encoding="utf-8-sig") as handle:
-        for row in csv.DictReader(handle):
-            relation = (row.get("domain_relation") or "").strip()
-            if relation not in {"inside_domain", "near_domain_boundary"}:
-                continue
-            y_name = (row.get("y_name") or "").strip()
-            for domain_key in (row.get("matched_raw_domain_keys") or "").split(";"):
-                domain_key = domain_key.strip()
-                if y_name and domain_key:
-                    overlay.add((y_name, domain_key))
-    return overlay
-
-
 def draw_matplotlib_figure(
     tree: base.Node,
     tree_labels: List[str],
@@ -83,10 +64,11 @@ def draw_matplotlib_figure(
     subtitle: str,
     show_legend: bool,
     style: dict,
-    ptm_overlay: set[tuple[str, str]] | None = None,
+    domain_meta: dict | None = None,
 ):
     plt, patches = load_matplotlib()
-    layout = base.prepare_layout(tree, tree_labels, domain_keys, style)
+    style = base.style_with_text_context(style, title, subtitle)
+    layout = base.prepare_layout(tree, tree_labels, domain_keys, style, domain_meta=domain_meta)
 
     fig = plt.figure(
         figsize=(layout["width"] / base.SVG_DPI, layout["height"] / base.SVG_DPI),
@@ -101,8 +83,8 @@ def draw_matplotlib_figure(
 
     category_colors = dict(base.DEFAULT_CATEGORY_COLORS)
     category_colors.update(style.get("category_colors", {}))
+    unmapped_color = str(style.get("unmapped_motif_color", base.UNMAPPED_MOTIF_COLOR))
     font_family = mpl_font_family(style)
-    ptm_overlay = ptm_overlay or set()
 
     ax.text(
         layout["title_x"],
@@ -117,12 +99,13 @@ def draw_matplotlib_figure(
     )
     line_y = layout["title_y"] + float(style["title_line_offset"])
     line_half = float(style["title_line_half_length"])
-    ax.plot(
-        [layout["title_x"] - line_half, layout["title_x"] + line_half],
-        [line_y, line_y],
-        color=str(style["frame_color"]),
-        linewidth=pt(style["title_line_width"]),
-    )
+    if float(style["title_line_width"]) > 0:
+        ax.plot(
+            [layout["title_x"] - line_half, layout["title_x"] + line_half],
+            [line_y, line_y],
+            color=str(style["frame_color"]),
+            linewidth=pt(style["title_line_width"]),
+        )
     ax.text(
         layout["title_x"],
         layout["subtitle_y"],
@@ -165,7 +148,7 @@ def draw_matplotlib_figure(
         )
         swatch_size = float(style["legend_swatch_size"])
         row_gap = float(style["legend_row_gap"])
-        for idx, category in enumerate(["Pol I", "Pol II", "Pol III"]):
+        for idx, category in enumerate(base.ordered_display_groups(ordered_rows)):
             y = legend_y + 12.0 + idx * row_gap
             ax.add_patch(
                 patches.Rectangle(
@@ -201,7 +184,7 @@ def draw_matplotlib_figure(
             rotation_mode="anchor",
             fontsize=pt(style["protein_label_font_size"]),
             family=font_family,
-            color=category_colors.get(row.get("category", ""), "#000000"),
+            color=base.group_color(row, category_colors),
         )
 
     for idx in range(len(tree_labels) + 1):
@@ -215,7 +198,8 @@ def draw_matplotlib_figure(
 
     for row_idx, domain in enumerate(domain_keys):
         cy = matrix_top + (row_idx + 0.5) * cell_h
-        label = base.short_domain_label(domain)
+        meta = (domain_meta or {}).get(domain)
+        label = base.domain_display_label(domain, domain_meta)
         ax.text(
             matrix_left - 8,
             cy + 3,
@@ -224,38 +208,26 @@ def draw_matplotlib_figure(
             va="center",
             fontsize=pt(style["domain_label_font_size"]),
             family=font_family,
-            color="black",
+            color=unmapped_color if meta and meta.get("status") == "unmapped" else "black",
         )
         for col_idx, row in enumerate(ordered_rows):
             raw = str(row.get(domain, "0") or "0").strip()
             if raw in {"0", "", "0.0"}:
                 continue
             cx = matrix_left + (col_idx + 0.5) * cell_w
+            if meta and meta.get("status") == "unmapped":
+                dot_fill = dot_stroke = unmapped_color
+            else:
+                dot_fill, dot_stroke = base.dot_colors(row, style, category_colors)
             ax.add_patch(
                 patches.Circle(
                     (cx, cy),
                     radius=float(style["dot_radius"]),
-                    facecolor=str(style["dot_fill"]),
-                    edgecolor=str(style["dot_stroke"]),
+                    facecolor=dot_fill,
+                    edgecolor=dot_stroke,
                     linewidth=pt(style["dot_stroke_width"]),
                 )
             )
-            if (row.get("y_name", ""), domain) in ptm_overlay:
-                ax.plot(
-                    [cx - 2.3, cx + 2.3],
-                    [cy - 2.3, cy + 2.3],
-                    color="#f2c94c",
-                    linewidth=pt(1.15),
-                    solid_capstyle="round",
-                )
-                ax.plot(
-                    [cx - 2.3, cx + 2.3],
-                    [cy + 2.3, cy - 2.3],
-                    color="#f2c94c",
-                    linewidth=pt(1.15),
-                    solid_capstyle="round",
-                )
-
     for x1, y1, x2, y2 in base.iter_tree_segments(tree):
         ax.plot(
             [x1, x2],
@@ -288,7 +260,7 @@ def main() -> int:
 
     if args.write_default_style_config:
         args.write_default_style_config.parent.mkdir(parents=True, exist_ok=True)
-        args.write_default_style_config.write_text(json.dumps(base.DEFAULT_STYLE, indent=2))
+        args.write_default_style_config.write_text(json.dumps(base.DEFAULT_STYLE, indent=2), encoding="utf-8")
         print(f"Wrote default style config: {args.write_default_style_config}")
         return 0
 
@@ -298,44 +270,15 @@ def main() -> int:
     style = base.build_style(args)
     base.validate_style(style)
 
-    tree = base.NewickParser(args.tree.read_text()).parse()
-    raw_tree_labels = [leaf.name or "" for leaf in base.iter_leaves(tree)]
-    tree_labels = [base.normalize_tree_label(label) for label in raw_tree_labels]
-
-    protein_meta = base.read_protein_metadata(args.proteins)
-    ptm_overlay = load_ptm_overlay(args.ptm_intersections) if args.show_ptm_overlay else set()
-    domain_keys, matrix_by_y, _tree_rows, missing_from_tree = base.read_domain_hits(
-        hits_path=args.hits,
-        proteins_path=args.proteins,
-        protein_meta=protein_meta,
-        tree_labels=tree_labels,
-        category=args.category,
-        min_proteins=args.min_proteins,
-        exclude_mobidblite=args.exclude_mobidblite,
-    )
-
-    ordered_rows: List[dict] = []
-    resolved_tree_labels: List[str] = []
-    for raw_label, norm_label in zip(raw_tree_labels, tree_labels):
-        row = base.resolve_protein_row(raw_label, protein_meta) or base.resolve_protein_row(norm_label, protein_meta)
-        if not row:
-            continue
-        if args.category and row["category"] != args.category:
-            continue
-
-        y_name = row["y_name"]
-        if y_name not in matrix_by_y:
-            continue
-        ordered_rows.append(matrix_by_y[y_name])
-        resolved_tree_labels.append(norm_label)
-
-    if not ordered_rows:
-        raise SystemExit("No proteins selected for plotting. Check --category and input files.")
-
-    keep_labels = set(resolved_tree_labels)
-    pruned_tree = base.prune_tree(tree, keep_labels)
-    if pruned_tree is None:
-        raise SystemExit("Could not prune tree to selected proteins.")
+    if args.show_ptm_overlay:
+        print("PTM overlay rendering is currently disabled for matrix plots; ignoring --show-ptm-overlay.")
+    data = base.prepare_plot_data(args)
+    pruned_tree = data["tree"]
+    resolved_tree_labels = data["labels"]
+    ordered_rows = data["rows"]
+    domain_keys = data["domain_keys"]
+    domain_meta = data["domain_meta"]
+    missing_from_tree = data["missing_from_tree"]
 
     base.write_order_csv(args.order_csv, ordered_rows, resolved_tree_labels)
     fig = draw_matplotlib_figure(
@@ -347,7 +290,7 @@ def main() -> int:
         subtitle=args.subtitle,
         show_legend=not args.no_legend,
         style=style,
-        ptm_overlay=ptm_overlay,
+        domain_meta=domain_meta,
     )
 
     save_figure(fig, args.out)
@@ -355,6 +298,7 @@ def main() -> int:
         save_figure(fig, args.png, dpi=args.export_dpi)
     if args.pdf:
         save_figure(fig, args.pdf)
+    manifest = base.write_plot_manifest(args, "matplotlib", ordered_rows, domain_keys, missing_from_tree)
 
     print(f"Wrote Matplotlib figure: {args.out}")
     if args.png:
@@ -362,12 +306,14 @@ def main() -> int:
     if args.pdf:
         print(f"Wrote Matplotlib PDF: {args.pdf}")
     print(f"Wrote order table: {args.order_csv}")
+    print(f"Wrote figure manifest: {manifest}")
     print(f"Proteins plotted: {len(ordered_rows)}")
     print(f"Shared domains plotted: {len(domain_keys)}")
     print(f"Excluded MobiDBLite: {args.exclude_mobidblite}")
     print(f"Min proteins threshold: {args.min_proteins}")
-    if args.show_ptm_overlay:
-        print(f"Known PTM overlay markers: {len(ptm_overlay)}")
+    print(f"Deduped harmonized motifs: {args.dedupe_harmonized}")
+    print(f"Hidden empty protein columns: {args.hide_empty_columns}")
+    print(f"Column order: {args.order_by} ({args.subtitle})")
     if missing_from_tree:
         print("Missing from tree:", ", ".join(missing_from_tree))
     return 0

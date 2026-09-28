@@ -6,7 +6,21 @@ motif/domain matrix figure:
 - Script: `scripts/plot_clustalo_motif_figure_matplotlib.py`
 - Library: Matplotlib
 - Inputs: tree, hits, proteins, and optional style config files
-- Outputs: SVG by default, with optional PNG/PDF via `--png` and `--pdf`
+- Outputs: SVG by default, with optional high-resolution PNG/vector PDF via
+  `--png` and `--pdf`
+- PTM extraction tables are kept separate and are not rendered on matrix plots
+- If the proteins table contains `pol_i_subgroup`, Pol I labels and legend
+  entries distinguish axial and peri-axial groups.
+- `--dedupe-harmonized` collapses mapped rows to InterPro motif/domain IDs
+  where possible and keeps unmapped source motifs as grey rows.
+- `--hide-empty-columns` removes protein columns with no plotted motif/domain
+  hits after the selected filters are applied.
+- Long y-axis motif labels expand the left margin automatically so deduped
+  InterPro labels are not clipped.
+- The auto legend stays in the top corner unless it would overlap the centered
+  title or subtitle (small or sparse plots); then it moves below the subtitle.
+- Each run also writes `<figure>.plot.json`, which `scripts/build_output_index.py`
+  uses to label the figure in the HTML output index.
 
 Install the plotting dependency:
 

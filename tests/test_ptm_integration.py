@@ -13,6 +13,12 @@ import run_mtprompt_ptm as mtprompt
 
 
 class PtmExtractionTests(unittest.TestCase):
+    def write_csv(self, path, rows, fieldnames):
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+
     def test_normalize_ptm_family(self):
         cases = {
             "phosphorylated residue": "phosphorylation",
@@ -85,6 +91,36 @@ class PtmExtractionTests(unittest.TestCase):
         relation, matches = extract.classify_ptm_domain_relation(55, [], 10)
         self.assertEqual(relation, "no_domains")
         self.assertEqual(matches, [])
+
+    def test_csv_metadata_is_preserved_in_domain_matrices(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "proteins.csv"
+            self.write_csv(
+                path,
+                [
+                    {
+                        "category": "Pol I",
+                        "protein": "Example",
+                        "y_name": "YAL001C",
+                        "pol_i_subgroup": "axial",
+                    }
+                ],
+                ["category", "protein", "y_name", "pol_i_subgroup"],
+            )
+
+            entries = extract.read_csv_entries(path)
+            self.assertEqual(entries[0]["pol_i_subgroup"], "axial")
+
+            raw_all, _raw_filtered, _raw_counts, _raw_filtered_counts, domains, _filtered = extract.build_domain_matrices(
+                [{"y_name": "YAL001C", "raw_domain_key": "Pfam::A"}],
+                entries,
+                key_field="raw_domain_key",
+                min_count=1,
+            )
+
+            self.assertEqual(domains, ["Pfam::A"])
+            self.assertEqual(raw_all[0]["pol_i_subgroup"], "axial")
+            self.assertEqual(raw_all[0]["Pfam::A"], 1)
 
 
 class MtpromptTests(unittest.TestCase):
